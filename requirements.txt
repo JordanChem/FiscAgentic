@@ -1,0 +1,10 @@
+streamlit>=1.36.0
+openai>=1.40.0
+requests>=2.32.3
+beautifulsoup4>=4.12.3
+lxml>=5.2.2
+trafilatura>=1.8.1
+pdfminer.six>=20231228
+python-dateutil>=2.9.0.post0
+tldextract>=5.1.1
+
