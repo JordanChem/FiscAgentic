@@ -98,7 +98,7 @@ if prompt:
                 result = run_pipeline(prompt, status_callback=_status_cb)
 
             status_placeholder.empty()
-            docs = (result.get("enriched_docs") or result.get("usefull_docs") or result.get("docs")) if isinstance(result, dict) else None
+            docs = (result.get("usefull_docs") ) if isinstance(result, dict) else None
             brief = result.get("brief") if isinstance(result, dict) else None
             answer = result.get("answer") if isinstance(result, dict) else None
 
