@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Pipeline agentique (LLM-only + DuckDuckGo) pour récupérer et citer des sources fiscales FR :
+Pipeline agentique (LLM-only + Google CSE) pour récupérer et citer des sources fiscales FR :
 - Loi (CGI/LPF/LF/LFR), Doctrine (BOFiP/RM/QE), Jurisprudence (CE/CC/Cass/CAA), FiscalOnline.
 - Affiche (print) la sortie de chaque agent.
 Version allégée (pas de readability-lxml).
@@ -19,7 +19,7 @@ import requests
 import trafilatura
 from io import BytesIO
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, date
 from dateutil import parser as dateparser
 from pdfminer.high_level import extract_text as pdf_extract_text
 import urllib.parse
@@ -29,17 +29,22 @@ from urllib3.util.retry import Retry
 import re, urllib.parse
 from openai import OpenAI
 from dotenv import load_dotenv
+import google.generativeai as genai
 
 # Charger les variables définies dans .env
 load_dotenv()
 
 # ---------------- Config ----------------
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-nano")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 assert OPENAI_API_KEY, "Veuillez définir OPENAI_API_KEY"
 
 GOOGLE_API_KEY =  os.getenv("GOOGLE_API_KEY")
 GOOGLE_CSE_ID  = os.getenv("GOOGLE_CSE_ID")
+gemini_flash_client = genai.GenerativeModel("gemini-2.5-flash")
+assert GOOGLE_API_KEY, "Veuillez définir GOOGLE_API_KEY"
+genai.configure(api_key=GOOGLE_API_KEY)
+
 
 
 PRINT_WIDTH = 100
@@ -60,7 +65,6 @@ DOMAIN_WHITELIST = [
     "courdecassation.fr",
     "conseil-constitutionnel.fr",
     "fiscalonline.com",
-    "vie-publique.fr",
     "assemblee-nationale.fr",
     "senat.fr",
 ]
@@ -79,7 +83,6 @@ DOMAIN_AUTHORITY_WEIGHTS = {
     "conseil-constitutionnel.fr":1,
     "assemblee-nationale.fr":    1,
     "senat.fr":                  1,
-    "vie-publique.fr":           1,
     "fiscalonline.com":          1
 }
 
@@ -102,10 +105,40 @@ def llm_complete(system_prompt: str, user_prompt: str, temperature: float = 0.1,
     resp = client.chat.completions.create(
         model=OPENAI_MODEL,
         messages=[{"role":"system","content":sys2},{"role":"user","content":user_prompt}],
-        temperature=temperature,
-        max_tokens=max_tokens,
+        temperature=temperature
     )
     return resp.choices[0].message.content.strip()
+
+def llm_complete_gemini_flash(system_prompt: str, user_prompt: str, temperature: float = 0.1, max_tokens: int = 1200):
+    """
+    Utilise Gemini 2.5 Flash pour compléter le prompt.
+    Nécessite une instance client Gemini compatible (ex: google.generativeai.GenerativeModel).
+    """
+    sys2 = system_prompt + "\n\nCONTRAINTE: Réponds exclusivement en JSON valide, sans texte avant/après."
+    try:
+        # Supposons que 'gemini_flash_client' est une instance de google.generativeai.GenerativeModel
+        # et qu'elle a été initialisée ailleurs dans le code.
+        prompt = sys2 + "\n\n" + user_prompt
+        response = gemini_flash_client.generate_content(
+            prompt,
+            generation_config={
+                "temperature": temperature,
+                "response_mime_type": "application/json"
+            }
+        )
+        # Selon l'API Gemini, le texte est dans response.text ou response.candidates[0].content.parts[0].text
+        # On tente d'être compatible avec les deux
+        if hasattr(response, "text"):
+            return response.text.strip()
+        elif hasattr(response, "candidates") and response.candidates:
+            parts = response.candidates[0].content.parts
+            if parts and hasattr(parts[0], "text"):
+                return parts[0].text.strip()
+        return ""
+    except Exception as e:
+        import logging
+        logging.error(f"Gemini Flash error: {e}")
+        return ""
 
 # --------------- Utils ----------------
 def println(title, obj=None, sep="="):
@@ -192,11 +225,6 @@ def is_whitelisted(url: str) -> bool:
     d = domain_of(url)
     return any(d.endswith(w) for w in DOMAIN_WHITELIST)
 
-def parse_date_guess(s: str):
-    try:
-        return dateparser.parse(s, dayfirst=True)
-    except Exception:
-        return None
 
 def _session_with_retries(total=3, backoff=0.6):
     s = requests.Session()
@@ -208,30 +236,6 @@ def _session_with_retries(total=3, backoff=0.6):
     return s
 
 SESSION = _session_with_retries()
-
-def fetch_url(url: str, timeout=TIMEOUT, extra_headers=None):
-    h = {**HEADERS, **(extra_headers or {})}
-    r = SESSION.get(url, headers=h, timeout=timeout, allow_redirects=True)
-    r.raise_for_status()
-    return r
-
-def extract_text_from_response(resp: requests.Response):
-    """Extraction simple avec trafilatura, sinon BeautifulSoup."""
-    ctype = resp.headers.get("Content-Type","").lower()
-    content = resp.content
-    if "pdf" in ctype or resp.url.lower().endswith(".pdf"):
-        try:
-            return pdf_extract_text(BytesIO(content))
-        except Exception:
-            return ""
-    try:
-        txt = trafilatura.extract(content, include_comments=False, favor_recall=True)
-        if txt:
-            return txt
-        soup = BeautifulSoup(content, "lxml")
-        return soup.get_text(separator="\n")
-    except Exception:
-        return resp.text
 
 
 def _decode_ddg_href(href: str) -> str:
@@ -300,6 +304,7 @@ def ddg_search(query: str, max_results: int = 4) -> list[dict]:
     logging.error("All DuckDuckGo endpoints failed or returned no usable links.")
     return []
 
+
 def google_cse_search(query: str, max_results: int = 4) -> list[dict]:
     if not (GOOGLE_API_KEY and GOOGLE_CSE_ID):
         return []
@@ -307,33 +312,40 @@ def google_cse_search(query: str, max_results: int = 4) -> list[dict]:
         params = {
             "key": GOOGLE_API_KEY,
             "cx": GOOGLE_CSE_ID,
-            "q": query,
+            "q": query,               
             "num": min(max_results, 10),
             "safe": "off",
+            "hl": "fr",               # optionnel, pour des résultats FR
+            "gl": "fr",               # optionnel, géolocalisation France
         }
+       
         r = requests.get("https://www.googleapis.com/customsearch/v1", params=params, timeout=TIMEOUT)
         r.raise_for_status()
         data = r.json()
         out = []
         for it in (data.get("items") or [])[:max_results]:
             url = it.get("link")
-            title = it.get("title")
-            snippet = it.get("snippet") or ""
+            title = it.get("title") or it.get("htmlTitle")
+            snippet = it.get("snippet") or it.get("htmlSnippet") or ""
             if url and title:
                 out.append({"url": url, "title": title, "snippet": snippet})
         return out
     except Exception as e:
-        logging.error(f"Google CSE error: {e}")
+        print(e)
         return []
     
-
 def search_web(query: str, max_results: int = 4) -> list[dict]:
     # 1) Google CSE prioritaire (fiable, filtrable par domaines)
-    res = google_cse_search(query, max_results=max_results)
-    if res:
-        return res
-    # 2) Fallback DuckDuckGo HTML si CSE indispo/bloqué
-    return ddg_search(query, max_results=max_results)
+    try:
+        res = google_cse_search(query, max_results)
+        if res:
+            return res
+        else:
+            raise RuntimeError("Google CSE n'a retourné aucun résultat.")
+    except Exception as e:
+        import logging
+        logging.error(f"Erreur lors de la recherche Google CSE: {e}")
+        return []
 
 
 # --- Ajoute cette fonction utilitaire quelque part au-dessus des agents ---
@@ -372,11 +384,12 @@ def normalize_queries(raw) -> list[dict]:
 
 # --------------- Agents ----------------
 def agent_A_clarify(user_query: str) -> dict:
+
+    doc_types = json.dumps(DOMAIN_WHITELIST) 
     system = (
         "Tu es fiscaliste senior en France. Reformule la question en un BRIEF JSON : "
         "{issue, scope:{impot, fait_generateur, periode, population}, key_terms[], exclusions[], "
-        "doc_types:[CGI, BOFiP, Jurisprudence, FiscalOnline, vie-publique.fr, assemblee-nationale.fr, senat.fr, conseil-constitutionnel.fr, conseil-etat.fr, courdecassation.fr], time_bounds:{from,to}}. "
-        "Prends en compte ces sources : legifrance.gouv.fr, bofip.impots.gouv.fr, conseil-etat.fr, courdecassation.fr, conseil-constitutionnel.fr, fiscalonline.com, vie-publique.fr, assemblee-nationale.fr, senat.fr."
+        f"doc_types:[{doc_types}], time_bounds:{{from,to}}. "
     )
 
     
@@ -389,21 +402,7 @@ def agent_A_clarify(user_query: str) -> dict:
 
 def agent_B_plan(brief: dict, gaps: dict | None = None) -> dict:
     system = (
-        "Transforme le BRIEF en plan de recherche à haut rappel. "
-        "Sortie JSON: {queries:{loi[], doctrine[], jurisprudence[], travaux_parlementaires[], fiscalonline[]}, "
-        "must_have_terms[], time_filters:{after}, notes}. "
-        "Prends en compte ces sources : legifrance.gouv.fr, bofip.impots.gouv.fr, conseil-etat.fr, courdecassation.fr, conseil-constitutionnel.fr, fiscalonline.com, vie-publique.fr, assemblee-nationale.fr, senat.fr. "
-    )
-
-    system += (
-        "Inclure alias d'articles et opérateurs site:/intitle:/filetype:. "
-        "Utilise STRICTEMENT ces domaines pour site: : "
-        "legifrance.gouv.fr, bofip.impots.gouv.fr, conseil-etat.fr, courdecassation.fr, conseil-constitutionnel.fr, fiscalonline.com, vie-publique.fr, assemblee-nationale.fr, senat.fr. "
-        "N'utilise pas d'autres domaines ressemblants (ex: 'bo-fip.fr' est interdit)."
-    )
-
-    system = (
-    "Transforme le BRIEF en plan de recherche à haut rappel.\n"
+    "Transforme le BRIEF en plan de recherche à haut rappel. L'objectif est de trouver des sources fiscales qui répondent à la question. Base toi principalement sur l'issue du BRIEF, et sur la population mentionnée.\n"
     "Sortie JSON STRICTE au format : "
     "{queries:{loi[], doctrine[], jurisprudence[], travaux_parlementaires[], fiscalonline[]}, "
     "must_have_terms[], time_filters:{after}, notes}.\n\n"
@@ -419,10 +418,8 @@ def agent_B_plan(brief: dict, gaps: dict | None = None) -> dict:
     "- Si le BRIEF contient une borne temporelle (time_bounds.from), ajoute un filtre temporel approprié (after:YYYY-MM-DD).\n"
     "- Évite les doublons et reste concis (3 à 6 requêtes par famille suffisent).\n"
 )
-        
+   
     prompt = f"BRIEF:\n{json.dumps(brief, ensure_ascii=False)}\nGAPS:\n{json.dumps(gaps or {}, ensure_ascii=False)}"
-
-    
 
     out = llm_complete(system, prompt)
     try:
@@ -432,16 +429,20 @@ def agent_B_plan(brief: dict, gaps: dict | None = None) -> dict:
 
 # --- Remplace ta fonction agent_C_queries par celle-ci ---
 def agent_C_queries(plan: dict) -> list[dict]:
+
+    sources = json.dumps(DOMAIN_WHITELIST) 
+
     system = (
-        "Génère des requêtes DuckDuckGo à partir du plan (plan.queries.*). "
-        "Tu peux renvoyer soit un dict par familles {loi[], doctrine[], jurisprudence[], travaux_parlementaires[], fiscalonline[]}, "
-        "soit une liste d'objets [{family, q}], soit une liste de chaînes. "
-        "Prends en compte ces sources : legifrance.gouv.fr, bofip.impots.gouv.fr, conseil-etat.fr, courdecassation.fr, conseil-constitutionnel.fr, fiscalonline.com, vie-publique.fr, assemblee-nationale.fr, senat.fr. "
-        "Inclure alias d'articles et opérateurs site:/intitle:/filetype:. "
-        "Utilise STRICTEMENT ces domaines pour site: : "
-        "legifrance.gouv.fr, bofip.impots.gouv.fr, conseil-etat.fr, courdecassation.fr, conseil-constitutionnel.fr, fiscalonline.com, vie-publique.fr, assemblee-nationale.fr, senat.fr. "
-        "N'utilise pas d'autres domaines ressemblants (ex: 'bo-fip.fr' est interdit)."
+    "Tu es un générateur de requêtes Google CSE pour la recherche fiscale française. "
+    "À partir du plan (plan.queries.*), construis des requêtes de recherche optimisées. "
+    "Répond sous la forme d'une liste d'objets [{family, q], "
+    "Inclure systématiquement les alias d’articles (par ex. 'CGI art. 209', 'Code général des impôts 209') "
+    "et la date doit être au format dd/MM/YYYY. "
+    f"Les recherches doivent se limiter STRICTEMENT à ces domaines pour l’opérateur site: : {sources}. "
+    "⚠️ N’utilise AUCUN autre domaine, même s’il ressemble (ex: 'bo-fip.fr' est interdit). "
+    "Sois exhaustif mais précis, et génère des requêtes réellement exploitables par une API Google CSE."
     )
+    
     prompt = json.dumps(plan, ensure_ascii=False)
     out = llm_complete(system, prompt)
     try:
@@ -456,26 +457,35 @@ def agent_D_search(queries: list[dict], max_per_family=6) -> dict:
         "loi": [],
         "doctrine": [],
         "jurisprudence": [],
+        "travaux_parlementaires": [],
         "fiscalonline": [],
-        "vie-publique": [],
-        "assemblee-nationale": [],
-        "senat": [],
-        "conseil-constitutionnel": [],
-        "conseil-etat": [],
-        "courdecassation": [],
     }
     for q in queries:
         print('Analyzing query : ', q)
         fam = q.get("family", "misc") if isinstance(q, dict) else "misc"
+        # Extraction avancée de qsite, qdate, qtext depuis q.get("q") si présent
         qtext = (q.get("q") if isinstance(q, dict) else str(q)) or ""
+        
+        if qtext:
+            
+            qtext = qtext.strip().replace('"', '')
+            qtext = qtext.replace("'", '')
+            qtext = qtext.replace("after:", '')
+            qtext = qtext.replace("before:", '')
+            
         if not qtext.strip():
             continue
         if fam not in hits:
             hits[fam] = []
         if len(hits[fam]) >= max_per_family:
             continue
+        
+        print(qtext)
+        results = search_web(
+            query=qtext,
+            max_results=4
+        )
 
-        results = search_web(qtext, max_results=4)
         for r in results:
             if is_whitelisted(r["url"]):
                 r["query"] = qtext
@@ -696,10 +706,11 @@ def agent_G_filter_simple(brief: dict, docs: list[dict]) -> list[dict]:
         "Tu es un assistant fiscal. "
         "Tu reçois une DEMANDE (BRIEF) et une LISTE D'ARTICLES (JSON). "
         "Ta tâche est de NE GARDER QUE les sources pertinentes pour répondre à la demande, correspondant à l'issue du BRIEF. "
-        "Accorde de l'importance à ces sources Code Général des Impôts, BOFIP, jurisprudence, FiscalOnline."
+        "Accorde de l'importance à ces sources Code Général des Impôts, BOFIP, jurisprudence, Travaux Parlementaires, FiscalOnline, dans cet ordre d'importance."
         "Renvoie UNIQUEMENT un JSON valide: une liste d'articles pertinents, "
         "dans le même format que la liste reçue (sans rien changer à la structure). "
         "Si aucun article n'est pertinent, renvoie la liste initiale."
+        "Il faudrait avoir au minimum 4-5 sources."
     )
 
     user = (
@@ -718,7 +729,96 @@ def agent_G_filter_simple(brief: dict, docs: list[dict]) -> list[dict]:
             return []
     except Exception:
         return []
-    
+
+def agent_H_enrich_with_content(filtered: list[dict]) -> list[dict]:
+    """
+    Pour chaque document de la liste filtrée, utilise LegalScraper pour récupérer le contenu de l'URL
+    et ajoute une clé 'content' au dictionnaire.
+    """
+    if not filtered:
+        return []
+
+    try:
+        from legal_scraper import LegalScraper
+    except ImportError:
+        # Si l'import échoue, retourne la liste sans modification
+        return filtered
+
+    scraper = LegalScraper()
+    enriched = []
+    for doc in filtered:
+        url = doc.get("url")
+        content = ""
+        if url:
+            try:
+                scraped = scraper.scrape_url(url)
+                # On tente d'extraire le contenu textuel principal
+                if hasattr(scraped, "content"):
+                    content = scraped.content
+                elif isinstance(scraped, dict) and "content" in scraped:
+                    content = scraped["content"]
+                else:
+                    content = str(scraped)
+            except Exception:
+                content = ""
+        doc_with_content = dict(doc)
+        doc_with_content["content"] = content
+        enriched.append(doc_with_content)
+    try:
+        scraper.close()
+    except Exception:
+        pass
+    return enriched
+
+def agent_I_answer(user_query: str, enriched_docs: list[dict]) -> str:
+    """
+    Agent I : Génère une réponse experte en fiscalité française à partir de la question utilisateur
+    et des documents enrichis (titre, source, content).
+    """
+    """
+    if not enriched_docs:
+        return (
+            "Je n'ai trouvé aucune source pertinente pour répondre à votre question fiscale. "
+            "Merci de reformuler ou de préciser votre demande."
+        )
+    """
+    # Prépare le prompt système pour l'agent expert fiscal
+
+    system = (
+        "Tu es un fiscaliste français senior, ta mission est de répondre à la question de l'utilisateur de manière claire, précise et exploitable."
+        "Voici quelques sources pouvant t'aider à répondre."
+        "Règles obligatoires : "
+        "- Tu donnes une réponse élaborée et utile"
+        "- Tu peux utiliser les sources fournies pour étayer ta réponse, mais tu NE DOIS PAS les évaluer, les juger ni commenter leur qualité. "
+        "- Si une source n'apporte rien, tu l'ignores simplement. Tu ne dis jamais qu'une source est vide, non exploitable ou non pertinente. "
+        "- Tu n'inventes jamais d'information. "
+        "- Si aucune règle claire n’existe, tu expliques simplement l’état du droit (ex : droit commun, dispositifs généraux) et tu invites à vérifier les lois de finances ou BOFiP récents, sans commenter les sources données. "
+        "Ton style doit être clair, neutre et adapté à un public professionnel de la fiscalité."
+    )
+
+    # Construit le contexte à partir des documents enrichis
+    docs_context = []
+    for doc in enriched_docs:
+        title = doc.get("title", "") or doc.get("url", "") or "(Sans titre)"
+        family = doc.get("family", "")
+        content = doc.get("content", "")
+        # On limite la taille du contenu pour éviter un prompt trop long
+        content_excerpt = content[:5000] + ("..." if len(content) > 5000 else "")
+        doc_block = f"TITRE: {title}\nFAMILLE: {family}\nCONTENU:\n{content_excerpt}"
+        docs_context.append(doc_block)
+    docs_str = "\n\n---\n\n".join(docs_context)
+
+    user = (
+        f"QUESTION UTILISATEUR:\n{user_query}\n\n"
+        f"SOURCES FOURNIES:\n{docs_str}\n\n"
+        "Répond à la question sous la forme d'un JSON {question, reponse}"
+    )
+
+    # Appel au LLM pour générer la réponse
+    answer = llm_complete_gemini_flash(system, user)
+    answer_json = parse_json_robuste(answer)
+    return answer_json.get("reponse", "")
+
 # --------------- Orchestrateur ----------------
 def run_pipeline(user_query: str, status_callback=None):
     # Internal helper to safely notify UI about current agent
@@ -764,6 +864,16 @@ def run_pipeline(user_query: str, status_callback=None):
     usefull_docs = agent_G_filter_simple(brief,ranked_docs)
     println("USEFULL_DOCS", usefull_docs)
 
+    _update_status("Agent H – Enrichissement avec le contenu")
+    println("[Agent H] Scraping")
+    enriched_docs = agent_H_enrich_with_content(usefull_docs)
+    println("ENRICHED_DOCS", enriched_docs)
+
+    _update_status("Agent I – Génération de la réponse")
+    println("[Agent I] Génération de la réponse")
+    answer = agent_I_answer(user_query, enriched_docs)
+    println("ANSWER", answer)
+
     _update_status("Finalisation…")
     return {
         "brief": brief,
@@ -773,6 +883,8 @@ def run_pipeline(user_query: str, status_callback=None):
         "docs": docs,
         "ranked_docs": ranked_docs,
         "usefull_docs":usefull_docs,
+        "enriched_docs":enriched_docs,
+        "answer":answer,
     }
 
 if __name__ == "__main__":

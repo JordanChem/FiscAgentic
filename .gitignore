@@ -35,3 +35,8 @@ data/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Not used doc
+simple_scraper.py
+advanced_usage.py
+test.ipynb

@@ -30,6 +30,7 @@ def render_docs(docs: list[dict]):
         "loi": "Loi",
         "doctrine": "Doctrine (BOFiP/RM/QE)",
         "jurisprudence": "Jurisprudence",
+        "travaux_parlementaires":"Travaux parlemenaires",
         "fiscalonline": "FiscalOnline",
     }
 
@@ -97,9 +98,16 @@ if prompt:
                 result = run_pipeline(prompt, status_callback=_status_cb)
 
             status_placeholder.empty()
-            docs = (result.get("usefull_docs") or result.get("docs")) if isinstance(result, dict) else None
+            docs = (result.get("enriched_docs") or result.get("usefull_docs") or result.get("docs")) if isinstance(result, dict) else None
             brief = result.get("brief") if isinstance(result, dict) else None
+            answer = result.get("answer") if isinstance(result, dict) else None
 
+            # Affiche d'abord la réponse à la question de l'utilisateur
+            if answer:
+                st.markdown("#### Réponse à votre question")
+                st.markdown(answer)
+
+            # Puis affiche les sources utilisées comme avant
             if isinstance(brief, dict) and brief.get("issue"):
                 answer_header = f"Voici des sources pertinentes pour: {brief.get('issue')}"
             else:
@@ -108,10 +116,10 @@ if prompt:
             st.markdown(answer_header)
             render_docs(docs or [])
 
-            # Persist assistant message with docs for history re-rendering
+            # Persist assistant message with docs and answer for history re-rendering
             st.session_state.messages.append({
                 "role": "assistant",
-                "content": answer_header,
+                "content": (f"#### Réponse à votre question\n{answer}\n\n" if answer else "") + answer_header,
                 "docs": docs or [],
             })
     except Exception as e:
