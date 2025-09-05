@@ -792,6 +792,7 @@ def agent_I_answer(user_query: str, enriched_docs: list[dict]) -> str:
         "- Tu peux utiliser les sources fournies pour étayer ta réponse, mais tu NE DOIS PAS les évaluer, les juger ni commenter leur qualité. "
         "- Si une source n'apporte rien, tu l'ignores simplement. Tu ne dis jamais qu'une source est vide, non exploitable ou non pertinente. "
         "- Tu n'inventes jamais d'information. "
+        "- Répond uniquement à la question sous la forme d'un JSON {question, reponse}"
         "- Si aucune règle claire n’existe, tu expliques simplement l’état du droit (ex : droit commun, dispositifs généraux) et tu invites à vérifier les lois de finances ou BOFiP récents, sans commenter les sources données. "
         "Ton style doit être clair, neutre et adapté à un public professionnel de la fiscalité."
     )
