@@ -42,6 +42,7 @@ def render_docs(docs: list[dict]):
             snippet = d.get("snippet", "")
             domain = d.get("source_domain", "")
             family = d.get("family", "")
+            score = d.get("score", "")
 
             cols = st.columns([0.06, 0.72, 0.22])
             with cols[0]:
@@ -60,6 +61,8 @@ def render_docs(docs: list[dict]):
                 if family:
                     fam_label = family_to_label.get(family, family)
                     right_lines.append(f"Famille: `{fam_label}`")
+                if score:
+                    right_lines.append(f"Score: `{score}`")
                 if right_lines:
                     st.write("\n".join(right_lines))
             st.divider()
@@ -98,7 +101,7 @@ if prompt:
                 result = run_pipeline(prompt, status_callback=_status_cb)
 
             status_placeholder.empty()
-            docs = (result.get("usefull_docs") ) if isinstance(result, dict) else None
+            docs = (result.get("ranked_docs") ) if isinstance(result, dict) else None
             brief = result.get("brief") if isinstance(result, dict) else None
             answer = result.get("answer") if isinstance(result, dict) else None
 

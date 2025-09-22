@@ -65,33 +65,31 @@ DOMAIN_WHITELIST = [
     "courdecassation.fr",
     "conseil-constitutionnel.fr",
     "fiscalonline.com",
-    "assemblee-nationale.fr",
     "senat.fr",
 ]
 
 # Domain authority weights for ranking (higher = more authoritative)
 # Domain authority (resserré : 0.65–0.90)
 
-AUTH_MIN, AUTH_MAX = 0.70, 1   # bornes du dict resserré
+AUTH_MIN, AUTH_MAX = 0.65, 1   # bornes du dict resserré
 FAM_MIN,  FAM_MAX  = 0.70, 1
 
 DOMAIN_AUTHORITY_WEIGHTS = {
-    "legifrance.gouv.fr":        1,
+    "legifrance.gouv.fr":        0.9,
     "bofip.impots.gouv.fr":      1,
-    "conseil-etat.fr":           1,
-    "courdecassation.fr":        1,
-    "conseil-constitutionnel.fr":1,
-    "assemblee-nationale.fr":    1,
-    "senat.fr":                  1,
-    "fiscalonline.com":          1
+    "conseil-etat.fr":           0.75,
+    "courdecassation.fr":        0.75,
+    "conseil-constitutionnel.fr":0.65,
+    "senat.fr":                  0.7,
+    "fiscalonline.com":          0.8
 }
 
 # Family priority (resserré : 0.70–0.82)
 FAMILY_WEIGHTS = {
-    "loi":         1,
-    "doctrine":    0.95,
+    "loi":         0.95,
+    "doctrine":    1,
     "jurisprudence":0.90,
-    "travaux_parlementaires":0.8,
+    "travaux_parlementaires":0.7,
     "fiscalonline":0.8,
 }
 
@@ -529,17 +527,6 @@ def _norm_family(family: str) -> float:
     w = FAMILY_WEIGHTS.get(family, (FAM_MIN + FAM_MAX)/2)
     return _minmax(w, FAM_MIN, FAM_MAX)
 
-def _family_intent_boost(query: str, family: str) -> float:
-    q = (query or "").lower()
-    boost = 0.0
-    if family == "loi" and re.search(r"\b(150-0\s?[a-z])\b|\bcode général des impôts\b|\bcgi\b", q, re.I):
-        boost += 0.10
-    if family == "doctrine" and re.search(r"\bboi-[a-z0-9\-]+|\bbofip\b", q, re.I):
-        boost += 0.10
-    if family == "jurisprudence" and re.search(r"\b(ecli|cass|conseil d[’']etat|ce|caa)\b", q, re.I):
-        boost += 0.10
-    # fiscalonline : pas de boost par défaut
-    return boost  # 0..0.10
 
 def _normalize_url_for_dedupe(url: str) -> str:
     try:
@@ -662,18 +649,17 @@ def agent_F_rank_and_dedupe(brief: dict, plan: dict, docs: list[dict], max_per_f
         # 1) Priors normalisés + boost d'intention
         auth = _norm_authority(domain)                 # 0..1
         fam  = _norm_family(family)                    # 0..1
-        fam += _family_intent_boost(query, family)     # +0..0.10 (cap via min)
-        fam = min(1.0, fam)
 
         # 2) Composants "données"
         recency   = _recency_real_bonus(d)             # 0..0.2
-        bm25f     = bm25f_title_snippet(query, d.get("title",""), d.get("snippet",""))
-        bm25f_norm = min(1.0, bm25f / 3.0)             # ~0..1
-        canon     = _canonical_bonus(d.get("title",""), d.get("snippet",""), url)  # 0..0.1
-        gen_pen   = _generic_penalty(d.get("title",""))                             # 0..~0.08
+        #bm25f     = bm25f_title_snippet(query, d.get("title",""), d.get("snippet",""))
+        #bm25f_norm = min(1.0, bm25f / 3.0)             # ~0..1
+        #canon     = _canonical_bonus(d.get("title",""), d.get("snippet",""), url)  # 0..0.1
+        #gen_pen   = _generic_penalty(d.get("title",""))                             # 0..~0.08
 
         # 3) Score pondéré (plus de poids à pertinence & fraicheur)
-        score = (0.10*auth + 0.10*fam + 0.30*recency + 0.40*bm25f_norm + 0.08*canon - 0.02*gen_pen)
+        #score = (0.10*auth + 0.10*fam + 0.30*recency + 0.40*bm25f_norm + 0.08*canon - 0.02*gen_pen)
+        score = auth + fam + recency
 
         scored.append({**d, "score": round(float(score), 4)})
 
@@ -788,13 +774,16 @@ def agent_I_answer(user_query: str, enriched_docs: list[dict]) -> str:
         "Tu es un fiscaliste français senior, ta mission est de répondre à la question de l'utilisateur de manière claire, précise et exploitable."
         "Voici quelques sources pouvant t'aider à répondre."
         "Règles obligatoires : "
-        "- Tu donnes une réponse élaborée et utile"
+        "- Tu donnes une réponse élaborée, utile et COMPLETE."
         "- Tu peux utiliser les sources fournies pour étayer ta réponse, mais tu NE DOIS PAS les évaluer, les juger ni commenter leur qualité. "
         "- Si une source n'apporte rien, tu l'ignores simplement. Tu ne dis jamais qu'une source est vide, non exploitable ou non pertinente. "
+        "- Si les sources ne t'aident pas, tu peux répondre à l'aide de tes connaissance."
         "- Tu n'inventes jamais d'information. "
         "- Répond uniquement à la question sous la forme d'un JSON {question, reponse}"
         "- Si aucune règle claire n’existe, tu expliques simplement l’état du droit (ex : droit commun, dispositifs généraux) et tu invites à vérifier les lois de finances ou BOFiP récents, sans commenter les sources données. "
-        "Ton style doit être clair, neutre et adapté à un public professionnel de la fiscalité."
+        "- Ton style doit être clair, neutre et adapté à un public professionnel de la fiscalité."
+        "- Si cela est pertinent, cite dans ta réponse le code général des impots et le BOFIP."
+        "- En fin de réponse, si une source "
     )
 
     # Construit le contexte à partir des documents enrichis
@@ -860,14 +849,15 @@ def run_pipeline(user_query: str, status_callback=None):
     ranked_docs = agent_F_rank_and_dedupe(brief, plan, docs, max_per_family=4)
     println("RANKED_DOCS", ranked_docs)
 
-    _update_status("Agent G – Vérifie la perinence des sources")
-    println("[Agent G] Check relevency")
-    usefull_docs = agent_G_filter_simple(brief,ranked_docs)
-    println("USEFULL_DOCS", usefull_docs)
+    #_update_status("Agent G – Vérifie la perinence des sources")
+    #println("[Agent G] Check relevency")
+    #usefull_docs = agent_G_filter_simple(brief,ranked_docs)
+    #println("USEFULL_DOCS", usefull_docs)
 
     _update_status("Agent H – Enrichissement avec le contenu")
     println("[Agent H] Scraping")
-    enriched_docs = agent_H_enrich_with_content(usefull_docs)
+    #enriched_docs = agent_H_enrich_with_content(usefull_docs)
+    enriched_docs = agent_H_enrich_with_content(ranked_docs)
     println("ENRICHED_DOCS", enriched_docs)
 
     _update_status("Agent I – Génération de la réponse")
@@ -883,7 +873,6 @@ def run_pipeline(user_query: str, status_callback=None):
         "hits": hits,
         "docs": docs,
         "ranked_docs": ranked_docs,
-        "usefull_docs":usefull_docs,
         "enriched_docs":enriched_docs,
         "answer":answer,
     }
