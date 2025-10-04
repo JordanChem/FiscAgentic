@@ -25,6 +25,7 @@ from pdfminer.high_level import extract_text as pdf_extract_text
 import urllib.parse
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from fuzzywuzzy import fuzz
 
 import re, urllib.parse
 from openai import OpenAI
@@ -59,8 +60,8 @@ HEADERS = {
 }
 DOMAIN_WHITELIST = [
     "legifrance.gouv.fr",
-    "impots.gouv.fr",
     "bofip.impots.gouv.fr",
+    'impots.gouv.fr',
     "conseil-etat.fr",
     "courdecassation.fr",
     "conseil-constitutionnel.fr",
@@ -77,6 +78,7 @@ FAM_MIN,  FAM_MAX  = 0.70, 1
 DOMAIN_AUTHORITY_WEIGHTS = {
     "legifrance.gouv.fr":        0.9,
     "bofip.impots.gouv.fr":      1,
+    'impots.gouv.fr':            1,
     "conseil-etat.fr":           0.75,
     "courdecassation.fr":        0.75,
     "conseil-constitutionnel.fr":0.65,
@@ -388,6 +390,9 @@ def agent_A_clarify(user_query: str) -> dict:
         "Tu es fiscaliste senior en France. Reformule la question en un BRIEF JSON : "
         "{issue, scope:{impot, fait_generateur, periode, population}, key_terms[], exclusions[], "
         f"doc_types:[{doc_types}], time_bounds:{{from,to}}. "
+        "Si aucune date n'est précisée par l'utilisateur, ne pas inclure time_bounds."
+        f"Indique un time_bounds UNIQUEMENT si une date est précisée par l'utilisateur. A titre indicatif, aujourd'hui nous sommes le : {datetime.today()} \n\n" 
+
     )
 
     
@@ -403,7 +408,9 @@ def agent_B_plan(brief: dict, gaps: dict | None = None) -> dict:
     "Transforme le BRIEF en plan de recherche à haut rappel. L'objectif est de trouver des sources fiscales qui répondent à la question. Base toi principalement sur l'issue du BRIEF, et sur la population mentionnée.\n"
     "Sortie JSON STRICTE au format : "
     "{queries:{loi[], doctrine[], jurisprudence[], travaux_parlementaires[], fiscalonline[]}, "
-    "must_have_terms[], time_filters:{after}, notes}.\n\n"
+    "must_have_terms[], time_filters:{after}, notes}."
+    f"Indique un time_filters UNIQUEMENT si une date est précisée dans le BRIEF. A titre indicatif, aujourd'hui nous sommes le : {datetime.today()} \n\n" 
+
     "RÈGLES :\n"
     "- Utilise STRICTEMENT ces domaines avec site: : "
     f"{DOMAIN_WHITELIST}.\n"
@@ -435,9 +442,10 @@ def agent_C_queries(plan: dict) -> list[dict]:
     "À partir du plan (plan.queries.*), construis des requêtes de recherche optimisées. "
     "Répond sous la forme d'une liste d'objets [{family, q], "
     "Inclure systématiquement les alias d’articles (par ex. 'CGI art. 209', 'Code général des impôts 209') "
-    "et la date doit être au format dd/MM/YYYY. "
     f"Les recherches doivent se limiter STRICTEMENT à ces domaines pour l’opérateur site: : {sources}. "
     "⚠️ N’utilise AUCUN autre domaine, même s’il ressemble (ex: 'bo-fip.fr' est interdit). "
+    "Si aucune date n'est précisée par l'utilisateur, ne pas inclure time_bounds."
+    "Indique un time_bounds UNIQUEMENT si une date est précisée par l'utilisateur. A titre indicatif, aujourd'hui nous sommes le : {datetime.today()} \n\n" 
     "Sois exhaustif mais précis, et génère des requêtes réellement exploitables par une API Google CSE."
     )
     
@@ -647,11 +655,14 @@ def agent_F_rank_and_dedupe(brief: dict, plan: dict, docs: list[dict], max_per_f
         query  = d.get("query", "")
 
         # 1) Priors normalisés + boost d'intention
-        auth = _norm_authority(domain)                 # 0..1
-        fam  = _norm_family(family)                    # 0..1
+        #auth = _norm_authority(domain)                 # 0..1
+        #fam  = _norm_family(family)                    # 0..1
+        auth = DOMAIN_AUTHORITY_WEIGHTS.get(domain)             # 0..1
+        fam  = FAMILY_WEIGHTS.get(family)  
 
         # 2) Composants "données"
-        recency   = _recency_real_bonus(d)             # 0..0.2
+        matching = fuzz.ratio(brief['issue'],d['title'])
+        #recency   = _recency_real_bonus(d)             # 0..0.2
         #bm25f     = bm25f_title_snippet(query, d.get("title",""), d.get("snippet",""))
         #bm25f_norm = min(1.0, bm25f / 3.0)             # ~0..1
         #canon     = _canonical_bonus(d.get("title",""), d.get("snippet",""), url)  # 0..0.1
@@ -659,7 +670,7 @@ def agent_F_rank_and_dedupe(brief: dict, plan: dict, docs: list[dict], max_per_f
 
         # 3) Score pondéré (plus de poids à pertinence & fraicheur)
         #score = (0.10*auth + 0.10*fam + 0.30*recency + 0.40*bm25f_norm + 0.08*canon - 0.02*gen_pen)
-        score = auth + fam + recency
+        score = auth + fam + 2*matching/100
 
         scored.append({**d, "score": round(float(score), 4)})
 
@@ -771,20 +782,24 @@ def agent_I_answer(user_query: str, enriched_docs: list[dict]) -> str:
     # Prépare le prompt système pour l'agent expert fiscal
 
     system = (
-        "Tu es un fiscaliste français senior, ta mission est de répondre à la question de l'utilisateur de manière claire, précise et exploitable."
-        "Voici quelques sources pouvant t'aider à répondre."
-        "Règles obligatoires : "
-        "- Tu donnes une réponse élaborée, utile et COMPLETE."
-        "- Tu peux utiliser les sources fournies pour étayer ta réponse, mais tu NE DOIS PAS les évaluer, les juger ni commenter leur qualité. "
-        "- Si une source n'apporte rien, tu l'ignores simplement. Tu ne dis jamais qu'une source est vide, non exploitable ou non pertinente. "
-        "- Si les sources ne t'aident pas, tu peux répondre à l'aide de tes connaissance."
-        "- Tu n'inventes jamais d'information. "
-        "- Répond uniquement à la question sous la forme d'un JSON {question, reponse}"
-        "- Si aucune règle claire n’existe, tu expliques simplement l’état du droit (ex : droit commun, dispositifs généraux) et tu invites à vérifier les lois de finances ou BOFiP récents, sans commenter les sources données. "
-        "- Ton style doit être clair, neutre et adapté à un public professionnel de la fiscalité."
-        "- Si cela est pertinent, cite dans ta réponse le code général des impots et le BOFIP."
-        "- En fin de réponse, si une source "
-    )
+    "Tu es un fiscaliste français senior. Ta mission est de répondre à la question de l'utilisateur de manière claire, précise et immédiatement exploitable. "
+    "Tu t'appuies sur tes connaissances en fiscalité française et, si elles sont disponibles, sur les sources fournies. "
+
+    "Règles obligatoires : "
+    "- Tu produis une réponse élaborée, utile et COMPLETE. "
+    "- Tu peux utiliser les sources fournies pour étayer ta réponse, mais tu NE DOIS PAS les évaluer, les juger ni commenter leur qualité. "
+    "- Si une source n'apporte rien, tu l'ignores simplement. Tu ne dis jamais qu'une source est vide, non exploitable ou non pertinente. "
+    "- Si les sources ne t’aident pas, tu réponds à l’aide de tes connaissances professionnelles. "
+    "- Tu n’inventes jamais d’information. "
+    "- Tu réponds exclusivement sous la forme d’un JSON : {\"question\": ..., \"reponse\": ...}. "
+    "- Si aucune règle claire n’existe, tu expliques l’état du droit applicable (ex : droit commun, dispositifs généraux) et invites à vérifier les dernières lois de finances ou mises à jour du BOFiP, sans commenter les sources fournies. "
+    "- Ton style est clair, neutre, professionnel et adapté à un public d’experts en fiscalité. "
+    "- Lorsque c’est pertinent, cite le Code général des impôts (CGI) et/ou le BOFiP. "
+
+    "Règle complémentaire sur les sources : "
+    "- Si au moins une source provient du site Fiscalonline, tu cites cette ou ces sources à la fin de ta réponse (ex : 'Source : Fiscalonline'). "
+    "- Si aucune source ne provient de Fiscalonline, termine simplement ta réponse par la mention : 'Retrouvez plus d'informations sur ce sujet ici : fiscalonline.com'."
+)
 
     # Construit le contexte à partir des documents enrichis
     docs_context = []
@@ -858,7 +873,7 @@ def run_pipeline(user_query: str, status_callback=None):
     println("[Agent H] Scraping")
     #enriched_docs = agent_H_enrich_with_content(usefull_docs)
     enriched_docs = agent_H_enrich_with_content(ranked_docs)
-    println("ENRICHED_DOCS", enriched_docs)
+    #println("ENRICHED_DOCS", enriched_docs)
 
     _update_status("Agent I – Génération de la réponse")
     println("[Agent I] Génération de la réponse")
