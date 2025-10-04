@@ -787,6 +787,7 @@ def agent_I_answer(user_query: str, enriched_docs: list[dict]) -> str:
 
     "Règles obligatoires : "
     "- Tu produis une réponse élaborée, utile et COMPLETE. "
+    "- Tu fournis des chiffres précis et tu n'omets pas les cas particuliers. Ton publique est un public d'experts en fiscalité. "
     "- Tu peux utiliser les sources fournies pour étayer ta réponse, mais tu NE DOIS PAS les évaluer, les juger ni commenter leur qualité. "
     "- Si une source n'apporte rien, tu l'ignores simplement. Tu ne dis jamais qu'une source est vide, non exploitable ou non pertinente. "
     "- Si les sources ne t’aident pas, tu réponds à l’aide de tes connaissances professionnelles. "
