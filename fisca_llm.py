@@ -83,7 +83,7 @@ DOMAIN_AUTHORITY_WEIGHTS = {
     "courdecassation.fr":        0.75,
     "conseil-constitutionnel.fr":0.65,
     "senat.fr":                  0.7,
-    "fiscalonline.com":          0.8
+    "fiscalonline.com":          0.75
 }
 
 # Family priority (resserré : 0.70–0.82)
@@ -114,9 +114,8 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 def llm_complete_5(system_prompt: str, user_prompt: str, temperature: float = 0.1, max_tokens: int = 1200):
     """
-    Utilise GPT-4 ou GPT-4 Turbo via l'API standard OpenAI.
-    Note: GPT-5 n'est pas encore disponible publiquement.
     """
+
     from openai import OpenAI
     
     sys2 = system_prompt + "\n\nCONTRAINTE: Réponds exclusivement en JSON valide, sans texte avant/après."
@@ -125,17 +124,10 @@ def llm_complete_5(system_prompt: str, user_prompt: str, temperature: float = 0.
     
     try:
         # Utilise l'API standard chat.completions
-        resp = client_.chat.completions.create(
-            model="gpt-4-turbo-preview",  # ou "gpt-4", "gpt-4-1106-preview", etc.
-            messages=[
-                {"role": "system", "content": sys2},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=temperature,
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"}  # Force la réponse en JSON
-        )
-        return resp.choices[0].message.content.strip()
+        resp = client_.responses.create(
+            model="gpt-5-chat-latest",
+            input = sys2 + "\n\n" + user_prompt) 
+        return resp.output[0].content[0].text
     except Exception as e:
         raise RuntimeError(f"llm_complete_5: Erreur lors de l'appel à l'API OpenAI: {str(e)}")
     
@@ -711,6 +703,9 @@ def agent_F_rank_and_dedupe(brief: dict, plan: dict, docs: list[dict], max_per_f
     deduped.sort(key=lambda x: x.get("score", 0.0), reverse=True)
     out, per_family_counts = [], {}
     for d in deduped:
+        # Ne garde que les articles ayant un score >= 2
+        if d.get("score", 0.0) < 2:
+            continue
         fam = d.get("family", "misc")
         cnt = per_family_counts.get(fam, 0)
         if cnt >= max_per_family:
