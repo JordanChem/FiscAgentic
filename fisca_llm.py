@@ -113,15 +113,32 @@ def llm_complete(system_prompt: str, user_prompt: str, temperature: float = 0.1,
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 def llm_complete_5(system_prompt: str, user_prompt: str, temperature: float = 0.1, max_tokens: int = 1200):
-    # On renforce l’instruction "JSON only"
+    """
+    Utilise GPT-4 ou GPT-4 Turbo via l'API standard OpenAI.
+    Note: GPT-5 n'est pas encore disponible publiquement.
+    """
+    from openai import OpenAI
+    
     sys2 = system_prompt + "\n\nCONTRAINTE: Réponds exclusivement en JSON valide, sans texte avant/après."
-    resp = client.chat.completions.create(
-        model='gpt-5-pro',
-        messages=[{"role":"system","content":sys2},{"role":"user","content":user_prompt}],
-        temperature=temperature
-    )
-    return resp.choices[0].message.content.strip()
-
+    
+    client_ = client  # reuse global OpenAI client
+    
+    try:
+        # Utilise l'API standard chat.completions
+        resp = client_.chat.completions.create(
+            model="gpt-4-turbo-preview",  # ou "gpt-4", "gpt-4-1106-preview", etc.
+            messages=[
+                {"role": "system", "content": sys2},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format={"type": "json_object"}  # Force la réponse en JSON
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception as e:
+        raise RuntimeError(f"llm_complete_5: Erreur lors de l'appel à l'API OpenAI: {str(e)}")
+    
 def llm_complete_gemini_flash(system_prompt: str, user_prompt: str, temperature: float = 0.1, max_tokens: int = 1200):
     """
     Utilise Gemini 2.5 Flash pour compléter le prompt.
