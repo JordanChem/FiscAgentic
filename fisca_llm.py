@@ -115,8 +115,6 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 def llm_complete_5(system_prompt: str, user_prompt: str, temperature: float = 0.1, max_tokens: int = 1200):
     """
     """
-
-    from openai import OpenAI
     
     sys2 = system_prompt + "\n\nCONTRAINTE: Réponds exclusivement en JSON valide, sans texte avant/après."
     
@@ -846,8 +844,8 @@ def agent_I_answer(user_query: str, enriched_docs: list[dict]) -> str:
     )
 
     # Appel au LLM pour générer la réponse
-    #answer = llm_complete_gemini_flash(system, user)
-    answer = llm_complete_5(system, user)
+    answer = llm_complete_gemini_flash(system, user)
+    #answer = llm_complete_5(system, user)
     answer_json = parse_json_robuste(answer)
     return answer_json.get("reponse", "")
 

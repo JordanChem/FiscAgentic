@@ -34,6 +34,7 @@ data/
 *.log
 
 # Streamlit
+# ajoute ici le fichier secrets.toml présent dans .streamlit
 .streamlit/secrets.toml
 
 # Not used doc
