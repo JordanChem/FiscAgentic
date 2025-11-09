@@ -18,26 +18,25 @@ except Exception as import_error:
 st.set_page_config(page_title="Fisca LLM – Chat", page_icon="💬", layout="wide")
 
 # Configuration du mot de passe
-PASSWORD = st.secrets.get("password") 
-
-# Vérification de l'authentification
-if "authenticated" not in st.session_state:
-    st.session_state.authenticated = False
-
-if not st.session_state.authenticated:
-    st.title("🔒 Authentification requise")
-    st.markdown("Veuillez entrer le mot de passe pour accéder à l'application.")
-    
-    password_input = st.text_input("Mot de passe", type="password", key="password_input")
-    
-    if st.button("Se connecter"):
-        if password_input == PASSWORD:
-            st.session_state.authenticated = True
-            st.rerun()
-        else:
-            st.error("❌ Mot de passe incorrect. Veuillez réessayer.")
-    st.stop()
-
+# PASSWORD = st.secrets.get("password") 
+#
+# # Vérification de l'authentification
+# if "authenticated" not in st.session_state:
+#     st.session_state.authenticated = False
+#
+# if not st.session_state.authenticated:
+#     st.title("🔒 Authentification requise")
+#     st.markdown("Veuillez entrer le mot de passe pour accéder à l'application.")
+#     
+#     password_input = st.text_input("Mot de passe", type="password", key="password_input")
+#     
+#     if st.button("Se connecter"):
+#         if password_input == PASSWORD:
+#             st.session_state.authenticated = True
+#             st.rerun()
+#         else:
+#             st.error("❌ Mot de passe incorrect. Veuillez réessayer.")
+#     st.stop()
 # Si authentifié, afficher l'application normale
 st.title("💬 Fisca LLM – Chat")
 st.caption("Posez une question fiscale en français. L'app appelle un pipeline de recherche et affiche les sources trouvées (loi, doctrine, jurisprudence, articles).")
