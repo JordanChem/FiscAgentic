@@ -11,6 +11,7 @@ Sites supportés:
 - assemblee-nationale.fr
 - senat.fr
 - fiscalonline.com
+- europa.eu (CJUE)
 """
 
 import requests
@@ -43,7 +44,7 @@ class ScrapedContent:
 class LegalScraper:
     """Scraper principal pour les sites juridiques et fiscaux français"""
     
-    def __init__(self, delay: float = 1.0, timeout: int = 30):
+    def __init__(self, delay: float = 0.3, timeout: int = 30):
         self.session = requests.Session()
         self.session.headers.update( {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
@@ -68,7 +69,8 @@ class LegalScraper:
             'conseil-constitutionnel.fr': 'jurisprudence',
             'assemblee-nationale.fr': 'parlementaire',
             'senat.fr': 'parlementaire',
-            'fiscalonline.com': 'fiscal'
+            'fiscalonline.com': 'fiscal',
+            'europa.eu': 'jurisprudence_eu'
         }
     
     def get_site_type(self, url: str) -> str:
@@ -104,6 +106,8 @@ class LegalScraper:
                 return self._scrape_jurisprudence_site(url, response)
             elif site_type == 'parlementaire':
                 return self._scrape_parliamentary_site(url, response)
+            elif site_type == 'jurisprudence_eu':
+                return self._scrape_curia(url, response)
             else:
                 return self._scrape_generic(url, response)
                 
@@ -388,7 +392,72 @@ class LegalScraper:
             timestamp=time.strftime('%Y-%m-%d %H:%M:%S'),
             raw_html=response.text
         )
-    
+
+    def _scrape_curia(self, url: str, response: requests.Response) -> ScrapedContent:
+        """Scraping spécialisé pour le site de la CJUE (curia.europa.eu)"""
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        # Extraction du titre
+        title = ""
+        title_elem = soup.find('h1') or soup.find('title')
+        if title_elem:
+            title = title_elem.get_text(strip=True)
+
+        # Extraction du contenu
+        content = ""
+
+        # Essayer les sélecteurs spécifiques à Curia
+        main_content = (
+            soup.find('div', class_='content') or
+            soup.find('div', id='document_content') or
+            soup.find('div', class_='doc-content') or
+            soup.find('article') or
+            soup.find('main')
+        )
+
+        if main_content:
+            content = main_content.get_text(strip=True)
+        else:
+            # Fallback avec trafilatura
+            content = trafilatura.extract(response.text, include_formatting=True) or ""
+
+        # Extraction des métadonnées CJUE
+        metadata = self._extract_curia_metadata(soup, url)
+
+        return ScrapedContent(
+            url=url,
+            title=title,
+            content=content,
+            metadata=metadata,
+            site_type='jurisprudence_eu',
+            timestamp=time.strftime('%Y-%m-%d %H:%M:%S'),
+            raw_html=response.text
+        )
+
+    def _extract_curia_metadata(self, soup: BeautifulSoup, url: str) -> Dict:
+        """Extraction des métadonnées spécifiques à la CJUE"""
+        metadata = {
+            'source': 'CJUE',
+            'language': 'fr'
+        }
+
+        # Numéro d'affaire (pattern C-xxx/xx)
+        case_number = re.search(r'C-\d+/\d+', url) or re.search(r'C-\d+/\d+', soup.get_text())
+        if case_number:
+            metadata['case_number'] = case_number.group()
+
+        # Date de décision
+        date_elem = soup.find('span', class_='date') or soup.find('time')
+        if date_elem:
+            metadata['date_decision'] = date_elem.get_text(strip=True)
+
+        # Type de document (arrêt, conclusions, etc.)
+        doc_type_elem = soup.find('span', class_='doc-type') or soup.find('div', class_='document-type')
+        if doc_type_elem:
+            metadata['type_document'] = doc_type_elem.get_text(strip=True)
+
+        return metadata
+
     def _scrape_generic(self, url: str, response: requests.Response) -> ScrapedContent:
         """Scraping générique avec trafilatura"""
         soup = BeautifulSoup(response.text, 'html.parser')
