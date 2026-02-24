@@ -28,6 +28,7 @@ from agents.specialises import (
 )
 from agents.generaliste import agent_generaliste
 from agents.verificateur import agent_verificateur
+from utils.fiscalonline import main_fiscalonline
 from agents.jurisprudence_dork import generate_jurisprudence_dork
 from agents.ranker import agent_ranker
 from agents.redactionnel import agent_redactionnel, agent_redactionnel_stream
@@ -195,6 +196,12 @@ def process_question(user_question: str, is_follow_up: bool = False, contexte: D
         result_analyste = agent_analyste(user_question, google_key, model_name=model_analyste)
         analyst_json = lire_json_beton(result_analyste)
         logger.info("[1/9] Analyste OK (%.1fs) — réponse: %d chars", time.time() - t0, len(result_analyste))
+
+        # Lancement en parallèle : récupération articles FiscalOnline internes
+        _fiscalonline_executor = ThreadPoolExecutor(max_workers=1)
+        _fiscalonline_future = _fiscalonline_executor.submit(
+            main_fiscalonline, user_question, result_analyste, openai_key
+        )
 
         # Étape 2 : Agent Orchestrateur
         current_step = "Routage vers les agents spécialisés"
@@ -386,6 +393,17 @@ def process_question(user_question: str, is_follow_up: bool = False, contexte: D
         n_ok = sum(1 for d in doc_enriched if d.get("content"))
         logger.info("[10] Scraping OK (%.1fs) — %d/%d URLs avec contenu", time.time() - t0, n_ok, len(doc_enriched))
 
+        # Fusion avec les articles FiscalOnline récupérés en parallèle
+        doc_fiscalonline = []
+        try:
+            doc_fiscalonline = _fiscalonline_future.result(timeout=60) or []
+            _fiscalonline_executor.shutdown(wait=False)
+            if doc_fiscalonline:
+                logger.info("[10b] FiscalOnline — %d articles ajoutés à doc_enriched", len(doc_fiscalonline))
+                doc_enriched = doc_fiscalonline + doc_enriched
+        except Exception as e:
+            logger.warning("[10b] FiscalOnline — erreur récupération articles : %s", e)
+
         # Étape 11 : Rédaction (streaming)
         current_step = "Rédaction de la réponse"
         status_text.text("✍️ Rédaction de la réponse...")
@@ -407,7 +425,7 @@ def process_question(user_question: str, is_follow_up: bool = False, contexte: D
 
         return {
             "reponse_stream": stream_gen,
-            "sources": ranked_keep,
+            "sources": doc_fiscalonline + ranked_keep,
             "analyste": analyst_json
         }
         

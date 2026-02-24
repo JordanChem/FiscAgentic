@@ -139,6 +139,7 @@ def agent_ranker(
         messages=chat_messages,
         temperature=0,
         response_format={"type": "json_object"},
+        max_tokens=16384,
     )
     # Extraction du JSON "strict"
     import json
