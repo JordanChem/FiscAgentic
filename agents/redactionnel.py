@@ -8,6 +8,30 @@ from typing import List, Dict
 
 logger = logging.getLogger(__name__)
 
+# Limites de sécurité pour ne pas dépasser le contexte Gemini (1M tokens ≈ 4M chars)
+_MAX_CONTENT_PER_DOC = 10_000   # chars max par document scrapé
+_MAX_TOTAL_DOCS_CHARS = 3_500_000  # chars max pour l'ensemble du corpus (~875k tokens, limite Gemini = 1M)
+
+
+def _build_docs_str(enriched_docs: List[Dict]) -> str:
+    """Construit la chaîne de documents en tronquant pour rester dans les limites du contexte."""
+    docs_context = []
+    total = 0
+    for doc in enriched_docs:
+        title = doc.get("title", "") or doc.get("url", "") or "(Sans titre)"
+        source_domain = doc.get("source_domain", "")
+        content = doc.get("content", "")
+        if len(content) > _MAX_CONTENT_PER_DOC:
+            logger.warning("Redactionnel — contenu tronqué pour '%s' (%d → %d chars)", title, len(content), _MAX_CONTENT_PER_DOC)
+            content = content[:_MAX_CONTENT_PER_DOC] + "\n[... contenu tronqué ...]"
+        doc_block = f"TITRE: {title}\nDOMAINE SOURCE: {source_domain}\nCONTENU:\n{content}"
+        if total + len(doc_block) > _MAX_TOTAL_DOCS_CHARS:
+            logger.warning("Redactionnel — corpus tronqué à %d documents (limite totale atteinte)", len(docs_context))
+            break
+        docs_context.append(doc_block)
+        total += len(doc_block)
+    return "\n\n---\n\n".join(docs_context)
+
 
 def agent_redactionnel(user_question: str, analyst_results: str, enriched_docs: List[Dict], api_key: str, model_name: str = "gemini-3-flash-preview") -> str:
     """
@@ -27,15 +51,8 @@ def agent_redactionnel(user_question: str, analyst_results: str, enriched_docs: 
             "Merci de reformuler ou de préciser votre demande."
         )
 
-    # Construit le contexte à partir des documents enrichis
-    docs_context = []
-    for doc in enriched_docs:
-        title = doc.get("title", "") or doc.get("url", "") or "(Sans titre)"
-        source_domain = doc.get("source_domain", "")
-        content = doc.get("content", "")
-        doc_block = f"TITRE: {title}\nDOMAINE SOURCE: {source_domain}\nCONTENU:\n{content}"
-        docs_context.append(doc_block)
-    docs_str = "\n\n---\n\n".join(docs_context)
+    # Construit le contexte à partir des documents enrichis (avec troncature de sécurité)
+    docs_str = _build_docs_str(enriched_docs)
 
     # Prépare le prompt système pour l'agent expert fiscal
     system = f"""
@@ -110,15 +127,8 @@ def agent_redactionnel_stream(user_question: str, analyst_results: str, enriched
         )
         return
 
-    # Construit le contexte (même logique que agent_redactionnel)
-    docs_context = []
-    for doc in enriched_docs:
-        title = doc.get("title", "") or doc.get("url", "") or "(Sans titre)"
-        source_domain = doc.get("source_domain", "")
-        content = doc.get("content", "")
-        doc_block = f"TITRE: {title}\nDOMAINE SOURCE: {source_domain}\nCONTENU:\n{content}"
-        docs_context.append(doc_block)
-    docs_str = "\n\n---\n\n".join(docs_context)
+    # Construit le contexte (avec troncature de sécurité)
+    docs_str = _build_docs_str(enriched_docs)
 
     system = f"""
         Tu es un Expert Fiscaliste Senior (Directeur Technique). Ta mission est de rédiger une consultation fiscale de haut niveau, claire, précise et immédiatement exploitable.

@@ -197,11 +197,14 @@ def process_question(user_question: str, is_follow_up: bool = False, contexte: D
         analyst_json = lire_json_beton(result_analyste)
         logger.info("[1/9] Analyste OK (%.1fs) — réponse: %d chars", time.time() - t0, len(result_analyste))
 
-        # Lancement en parallèle : récupération articles FiscalOnline internes
-        _fiscalonline_executor = ThreadPoolExecutor(max_workers=1)
-        _fiscalonline_future = _fiscalonline_executor.submit(
-            main_fiscalonline, user_question, result_analyste, openai_key
-        )
+        # Lancement en parallèle : récupération articles FiscalOnline internes (si source active)
+        _fiscalonline_executor = None
+        _fiscalonline_future = None
+        if "fiscalonline.fr" in st.session_state.get('active_domains', []):
+            _fiscalonline_executor = ThreadPoolExecutor(max_workers=1)
+            _fiscalonline_future = _fiscalonline_executor.submit(
+                main_fiscalonline, user_question, result_analyste, openai_key
+            )
 
         # Étape 2 : Agent Orchestrateur
         current_step = "Routage vers les agents spécialisés"
@@ -395,14 +398,15 @@ def process_question(user_question: str, is_follow_up: bool = False, contexte: D
 
         # Fusion avec les articles FiscalOnline récupérés en parallèle
         doc_fiscalonline = []
-        try:
-            doc_fiscalonline = _fiscalonline_future.result(timeout=60) or []
-            _fiscalonline_executor.shutdown(wait=False)
-            if doc_fiscalonline:
-                logger.info("[10b] FiscalOnline — %d articles ajoutés à doc_enriched", len(doc_fiscalonline))
-                doc_enriched = doc_fiscalonline + doc_enriched
-        except Exception as e:
-            logger.warning("[10b] FiscalOnline — erreur récupération articles : %s", e)
+        if _fiscalonline_future is not None:
+            try:
+                doc_fiscalonline = _fiscalonline_future.result(timeout=60) or []
+                _fiscalonline_executor.shutdown(wait=False)
+                if doc_fiscalonline:
+                    logger.info("[10b] FiscalOnline — %d articles ajoutés à doc_enriched", len(doc_fiscalonline))
+                    doc_enriched = doc_fiscalonline + doc_enriched
+            except Exception as e:
+                logger.warning("[10b] FiscalOnline — erreur récupération articles : %s", e)
 
         # Étape 11 : Rédaction (streaming)
         current_step = "Rédaction de la réponse"

@@ -25,6 +25,8 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 
+from utils.json_utils import clean_json_codefence
+
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api-preprod-fiscalonline.stoati.fr"
@@ -259,7 +261,7 @@ def main_fiscalonline(
         relevant_tags_raw = agent_relevent_fiscalonline_tag(
             user_question, analyst_results, tags, api_key=api_key
         )
-        relevant_tags: dict = ast.literal_eval(relevant_tags_raw)
+        relevant_tags: dict = ast.literal_eval(clean_json_codefence(relevant_tags_raw))
 
         # 3. Articles correspondant aux tags sélectionnés
         list_articles = fetch_articles_by(relevant_tags.keys())
@@ -277,7 +279,7 @@ def main_fiscalonline(
         relevant_articles_raw = agent_ranker_fiscalonline(
             user_question, analyst_results, dic_articles, api_key=api_key
         )
-        relevant_article_ids: list = ast.literal_eval(relevant_articles_raw)
+        relevant_article_ids: list = ast.literal_eval(clean_json_codefence(relevant_articles_raw))
         df_relevant = articles[articles["id"].isin(relevant_article_ids)]
 
         # 5. Mise en forme au format doc_enriched
@@ -286,6 +288,7 @@ def main_fiscalonline(
                 "title": row["title"],
                 "url": "https://fiscalonline.com" + row["url"],
                 "content": clean_html_content(row["content"]),
+                "source_domain": "fiscalonline.fr",
             }
             for _, row in df_relevant.iterrows()
         ]
