@@ -2,6 +2,7 @@
 Application Streamlit pour l'assistant fiscal intelligent
 """
 import streamlit as st
+from streamlit_cookies_controller import CookieController
 import os
 import uuid
 import logging
@@ -492,6 +493,20 @@ def auto_save_conversation():
 def main():
     """Fonction principale de l'application"""
 
+    # Cookie controller (persistance de session entre rechargements)
+    cookie = CookieController()
+
+    # --- Restauration de session via cookie ---
+    if not st.session_state.user_email:
+        token = cookie.get("fisca_token")
+        if token:
+            try:
+                client = get_supabase_client()
+                user_data = client.auth.get_user(token)
+                st.session_state.user_email = user_data.user.email
+            except Exception:
+                cookie.remove("fisca_token")
+
     # --- Écran de login (Supabase Auth) ---
     if not st.session_state.user_email:
         st.title("📊 Assistant Fiscal Intelligent")
@@ -506,6 +521,7 @@ def main():
                 try:
                     res = client.auth.sign_in_with_password({"email": email, "password": password})
                     st.session_state.user_email = res.user.email
+                    cookie.set("fisca_token", res.session.access_token, max_age=7 * 24 * 3600)
                     st.rerun()
                 except Exception:
                     st.error("Email ou mot de passe incorrect.")
@@ -527,6 +543,7 @@ def main():
         # Utilisateur connecté + déconnexion
         st.write(f"👤 {st.session_state.user_email}")
         if st.button("Se déconnecter"):
+            cookie.remove("fisca_token")
             st.session_state.user_email = None
             st.session_state.messages = []
             st.session_state.contexte_conversation = None
@@ -574,44 +591,46 @@ def main():
             st.warning("⚠️ Aucune source active. Activez au moins une source pour effectuer des recherches.")
         
         st.divider()
-        
-        # Sélection des modèles pour chaque agent
-        st.header("🤖 Modèles IA")
-        st.caption("Choisissez le modèle à utiliser pour chaque agent")
-        
-        # Labels des agents
-        agent_labels = {
-            "analyste": "🔍 Analyste",
-            "generaliste": "🔎 Généraliste",
-            "jurisprudence": "⚖️ Jurisprudence",
-            "orchestrateur": "🎯 Orchestrateur",
-            "ranker": "📊 Ranker",
-            "redactionnel": "✍️ Rédactionnel",
-            "specialises": "👥 Spécialisés",
-            "suivi": "💭 Suivi",
-            "verificateur": "✅ Vérificateur"
-        }
 
-        # Créer les selectbox pour chaque agent (modèles filtrés par famille API)
-        for agent_key in DEFAULT_MODELS.keys():
-            label = agent_labels.get(agent_key, agent_key)
-            agent_models = GEMINI_MODELS if agent_key in GEMINI_AGENTS else OPENAI_MODELS
-            current_model = st.session_state.agent_models.get(agent_key, DEFAULT_MODELS[agent_key])
-            # S'assurer que le modèle actuel est valide pour cet agent
-            if current_model not in agent_models:
-                current_model = DEFAULT_MODELS[agent_key]
-                st.session_state.agent_models[agent_key] = current_model
-            index = agent_models.index(current_model) if current_model in agent_models else 0
-            selected_model = st.selectbox(
-                label,
-                options=agent_models,
-                index=index,
-                key=f"model_{agent_key}",
-                help=f"Modèle par défaut : {DEFAULT_MODELS[agent_key]}"
-            )
-            st.session_state.agent_models[agent_key] = selected_model
-        
-        st.divider()
+        # SECTION CHOIX DES MODÈLES — désactivée pour les utilisateurs finaux
+        # Pour réactiver : remplacer `if False:` par `if True:`
+        if False:  # noqa: SIM210
+            st.header("🤖 Modèles IA")
+            st.caption("Choisissez le modèle à utiliser pour chaque agent")
+
+            # Labels des agents
+            agent_labels = {
+                "analyste": "🔍 Analyste",
+                "generaliste": "🔎 Généraliste",
+                "jurisprudence": "⚖️ Jurisprudence",
+                "orchestrateur": "🎯 Orchestrateur",
+                "ranker": "📊 Ranker",
+                "redactionnel": "✍️ Rédactionnel",
+                "specialises": "👥 Spécialisés",
+                "suivi": "💭 Suivi",
+                "verificateur": "✅ Vérificateur"
+            }
+
+            # Créer les selectbox pour chaque agent (modèles filtrés par famille API)
+            for agent_key in DEFAULT_MODELS.keys():
+                label = agent_labels.get(agent_key, agent_key)
+                agent_models = GEMINI_MODELS if agent_key in GEMINI_AGENTS else OPENAI_MODELS
+                current_model = st.session_state.agent_models.get(agent_key, DEFAULT_MODELS[agent_key])
+                # S'assurer que le modèle actuel est valide pour cet agent
+                if current_model not in agent_models:
+                    current_model = DEFAULT_MODELS[agent_key]
+                    st.session_state.agent_models[agent_key] = current_model
+                index = agent_models.index(current_model) if current_model in agent_models else 0
+                selected_model = st.selectbox(
+                    label,
+                    options=agent_models,
+                    index=index,
+                    key=f"model_{agent_key}",
+                    help=f"Modèle par défaut : {DEFAULT_MODELS[agent_key]}"
+                )
+                st.session_state.agent_models[agent_key] = selected_model
+
+            st.divider()
         
         # Bouton pour réinitialiser la conversation
         if st.button("🗑️ Nouvelle conversation", use_container_width=True):
