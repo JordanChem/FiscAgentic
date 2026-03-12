@@ -133,7 +133,7 @@ def agent_analyste(user_question, api_key=None, model_name="gemini-3-flash-previ
     "    \"Requêtes sur les obligations déclaratives de maintien\",\n"
     "    \"Requêtes pour résoudre les 'À RECHERCHER' identifiés\"\n"
     "  ],\n"
-    "  \"points_de_vigilance_legiste\": [\"Lister les articles connexes dont la lecture est impérative pour comprendre le mécanisme global\"]\n"
+    "  \"points_d_attention_legiste\": [\"Lister les articles connexes dont la lecture est impérative pour comprendre le mécanisme global\"]\n"
     "}\n\n"
     "Aucun texte en dehors du JSON n'est autorisé.\n"
     "---\n"

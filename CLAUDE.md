@@ -34,7 +34,7 @@ Set these in `.env` file or Streamlit secrets (`.streamlit/secrets.toml`):
 
 The question processing follows this sequential pipeline:
 
-1. **Agent Analyste** (Gemini) - Deep technical analysis: identifies T0 (current) and T+1 (future) regimes, generates search axes (`axes_de_recherche_serp`), flags `points_de_vigilance_legiste`
+1. **Agent Analyste** (Gemini) - Deep technical analysis: identifies T0 (current) and T+1 (future) regimes, generates search axes (`axes_de_recherche_serp`), flags `points_d_attention_legiste`
 2. **Agent Orchestrateur** (OpenAI) - Routes to 1-4 specialized agents based on scores (threshold >= 0.6). Triggers mandatory `AGENT_DROIT_EUROPEEN` if EU/international compliance is detected.
 3. **Specialized Agents** (Gemini, parallel) - **11 domain experts** that identify relevant legal sources (5 categories each: `textes_legaux`, `bofip`, `jurisprudence`, `reponse_ministerielle`, `autres`):
    - `AGENT_PARTICULIERS_REVENUS` - Personal income tax (IR, BIC/BNC, pensions)
@@ -48,7 +48,7 @@ The question processing follows this sequential pipeline:
    - `AGENT_PROCEDURE_CONTENTIEUX` - Procedures and litigation (burden of proof, control)
    - `AGENT_TAXES_LOCALES` - Local taxes (TH, TF, CFE)
    - `AGENT_PRELEVEMENTS_SOCIAUX` - Social contributions (CSG, CRDS, coordination)
-4. **Agent Vérificateur** (Gemini) - Validates, deduplicates, and normalizes all specialist outputs. Audits coverage against analyste `points_de_vigilance_legiste`.
+4. **Agent Vérificateur** (Gemini) - Validates, deduplicates, and normalizes all specialist outputs. Audits coverage against analyste `points_d_attention_legiste`.
 5. **Agent Généraliste** (OpenAI) - Generates 7 categories of Google-optimized search queries with `site:` restrictions (legal texts, BOFiP, jurisprudence split 50% historical/50% recent, ministerial responses, CJUE, constitutional, unresolved markers)
 6. **Agent Jurisprudence Dork** (Gemini) - Generates specialized Google Dork queries targeting `courdecassation.fr`
 7. **SerpAPI Search** - Searches official French legal domains in parallel (max 8 workers)

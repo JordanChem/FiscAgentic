@@ -28,7 +28,7 @@ def agent_verificateur(user_question: str, analyst_results: str, agents_outputs:
         "🎯 TA MISSION\n"
         "À partir de :\n"
         "1️⃣ La QUESTION UTILISATEUR.\n"
-        "2️⃣ L'ANALYSE PRÉLIMINAIRE (le diagnostic de l'Analyste : concepts, seuils, points de vigilance).\n"
+        "2️⃣ L'ANALYSE PRÉLIMINAIRE (le diagnostic de l'Analyste : concepts, seuils, points d'attention).\n"
         "3️⃣ Les RÉSULTATS DES AGENTS SPÉCIALISÉS (listes de sources JSON).\n\n"
 
         "Tu dois produire une liste UNIQUE, FIABLE et COHÉRENTE de sources en suivant ces étapes :\n\n"

@@ -74,7 +74,7 @@ def agent_ranker(
         "2) L'ANALYSE PRÉLIMINAIRE de l'expert (le diagnostic technique).\n\n"
 
         "📌 RÉFÉRENTIEL PRIORITAIRE (L'ANALYSE DE L'EXPERT)\n"
-        "On te fournit un diagnostic stratégique (concepts T0, concepts miroirs T+1, points de vigilance) et les résultats d'agents spécialisés.\n"
+        "On te fournit un diagnostic stratégique (concepts T0, concepts miroirs T+1, points d'attention) et les résultats d'agents spécialisés.\n"
         f"DIAGNOSTIC : {analyst_results}\n\n"
 
         f"SPECIALISTES : {specialists_results}\n\n"
