@@ -114,15 +114,15 @@ OPENAI_AGENTS = {"orchestrateur", "generaliste", "ranker"}
 
 # Modèles par défaut pour chaque agent
 DEFAULT_MODELS = {
-    "analyste": "gemini-3-flash-preview",
-    "generaliste": "gpt-4o",
-    "jurisprudence": "gemini-3-flash-preview",
-    "orchestrateur": "gpt-4o",
-    "ranker": "gpt-4o",
-    "redactionnel": "gemini-3-flash-preview",
-    "specialises": "gemini-3-flash-preview",
     "suivi": "gemini-3-flash-preview",
-    "verificateur": "gemini-3-flash-preview"
+    "redactionnel": "claude-opus-4-8",
+    "analyste": "claude-sonnet-4-6",
+    "orchestrateur": "claude-sonnet-4-6",
+    "specialises": "claude-sonnet-4-6",
+    "verificateur": "claude-sonnet-4-6",
+    "generaliste": "claude-sonnet-4-6",
+    "jurisprudence": "claude-sonnet-4-6",
+    "ranker": "gpt-4o"
 }
 
 # Initialisation des modèles dans session_state
