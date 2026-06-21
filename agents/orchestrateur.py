@@ -3,8 +3,7 @@ Agent Orchestrateur : Route la question vers les agents spécialisés approprié
 """
 import os
 import logging
-import time
-import openai
+from utils.llm import llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -102,17 +101,11 @@ def agent_orchestrateur(user_question, analyst_results, api_key=None, model_name
     ANALYSE PRÉLIMINAIRE DE L'ANALYSTE :
     {analyst_results}
     """
-    logger.info("Orchestrateur — appel OpenAI (%s)", model_name)
-    t0 = time.time()
-    client = openai.OpenAI(api_key=api_key)
-    response = client.chat.completions.create(
-        model=model_name,
-        messages=[
-            {"role": "system", "content": "Tu es une IA d'orchestration experte qui dirige chaque question fiscale vers les bons agents spécialisés selon le prompt ci-après."},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0
+    res = llm_call(
+        model_name,
+        system="Tu es une IA d'orchestration experte qui dirige chaque question fiscale vers les bons agents spécialisés selon le prompt ci-après.",
+        prompt=prompt,
+        api_key=api_key,
+        agent_name="orchestrateur",
     )
-    content = response.choices[0].message.content
-    logger.info("Orchestrateur — réponse reçue (%.1fs)", time.time() - t0)
-    return content
+    return res.text

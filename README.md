@@ -101,6 +101,30 @@ Pour Streamlit Cloud :
 3. Connecter le dépôt
 4. Ajouter les secrets dans la configuration
 
+## 🧪 Tests & évaluation de la qualité
+
+Le pipeline dispose d'un système d'évaluation (golden dataset + comparaison de modèles) :
+
+- **Lancer une question seule** (réponse + coût + latence, sans notation) :
+  ```bash
+  python test_pipeline.py "ma question fiscale"
+  ```
+- **Noter le golden dataset** (couverture d'articles + éléments attendus + fidélité) :
+  ```bash
+  python -m eval.run_eval --dataset ../golden_dataset_3.xlsx --judge gpt-4o
+  ```
+- **Comparer des modèles** (qualité × coût × latence) :
+  ```bash
+  python -m eval.compare --dataset ../golden_dataset_3.xlsx --configs baseline gemini3-pro claude
+  ```
+
+Tous les appels LLM passent par une couche unique [utils/llm.py](utils/llm.py) (LiteLLM :
+Gemini / OpenAI / **Anthropic**) qui capture coût/tokens/latence et trace vers Langfuse.
+
+📖 **Mode d'emploi pas-à-pas** : [eval/GUIDE.md](eval/GUIDE.md) — lancer une question (avec/sans
+éval), où voir les résultats, dashboards (Confident AI / Langfuse), changer les modèles.
+🏗️ **Architecture du système d'éval** : [eval/README.md](eval/README.md).
+
 ## 📁 Structure du projet
 
 ```
@@ -118,9 +142,23 @@ Pour Streamlit Cloud :
 │   └── suivi.py                # Agent de suivi conversationnel
 ├── utils/                      # Utilitaires
 │   ├── __init__.py
+│   ├── llm.py                  # Couche LLM unique (LiteLLM) + coût/latence/tracing
+│   ├── model_registry.py       # Mapping noms logiques → modèles LiteLLM (+ prix)
+│   ├── api_keys.py             # Récupération centralisée des clés
 │   ├── json_utils.py           # Parsing JSON robuste
 │   ├── search.py               # Recherche SerpAPI
 │   └── scraper_utils.py        # Utilitaires de scraping
+├── pipeline/                   # Pipeline réutilisable hors Streamlit
+│   └── core.py                 # run_pipeline(question, models_config) -> PipelineResult
+├── eval/                       # Évaluation qualité (voir eval/GUIDE.md)
+│   ├── dataset.py              # Chargement du golden dataset
+│   ├── articles.py             # Matching des références d'articles
+│   ├── metrics.py              # Métriques deepeval (articles, éléments, fidélité)
+│   ├── configs.py              # Configs de modèles nommées
+│   ├── cache.py                # Cache des exécutions du pipeline
+│   ├── run_eval.py             # Notation du golden dataset
+│   └── compare.py              # Comparaison de modèles (qualité × coût × latence)
+├── test_pipeline.py            # CLI : lance une question hors Streamlit
 ├── legal_scraper.py            # Scraper pour sites juridiques
 ├── requirements.txt            # Dépendances Python
 ├── .env.example                # Exemple de configuration

@@ -1,8 +1,8 @@
 """
 Agent de Suivi : Répond aux questions de suivi en utilisant le contexte de la conversation
 """
-import google.generativeai as genai
 from typing import Dict, List
+from utils.llm import llm_call
 
 
 def agent_suivi(user_question: str, contexte_conversation: Dict, api_key: str, model_name: str = "gemini-3-flash-preview") -> str:
@@ -81,8 +81,5 @@ def agent_suivi(user_question: str, contexte_conversation: Dict, api_key: str, m
         Si la question nécessite une nouvelle recherche complète (ex: changement de sujet), mets "necessite_nouvelle_recherche" à true.
     """
     
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(model_name=model_name)
-    response = model.generate_content(system_prompt)
-    
-    return response.text
+    res = llm_call(model_name, prompt=system_prompt, api_key=api_key, agent_name="suivi")
+    return res.text

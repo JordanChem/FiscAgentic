@@ -1,10 +1,10 @@
 """
 Agent Ranker : Classe et score les résultats de recherche
 """
-import openai
 import datetime
 import logging
 from typing import List, Dict
+from utils.llm import llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,15 @@ def agent_ranker(
         La liste renvoyée par GPT (JSON["results"]), chaque dict étant enrichi avec toutes les infos de structured_results correspondantes (title, url, snippet, etc).
     """
 
+    # Cap : au-delà de 100 candidats le JSON de réponse dépasse max_tokens (16 384)
+    MAX_CANDIDATES = 100
+    if len(structured_results) > MAX_CANDIDATES:
+        logger.warning(
+            "Ranker : %d candidats → tronqué à %d (limite max_tokens)",
+            len(structured_results), MAX_CANDIDATES,
+        )
+        structured_results = structured_results[:MAX_CANDIDATES]
+
     # Prépare les candidats conformément au format attendu pour le prompt (ajoute id...)
     candidates = []
     for idx, r in enumerate(structured_results):
@@ -47,10 +56,12 @@ def agent_ranker(
             candidate["source_type"] = "CGI"
         elif "bofip" in domain:
             candidate["source_type"] = "BOFIP"
-        elif "conseil-etat" in domain:
+        elif "conseil-etat" in domain or "jade.conseil-etat" in domain:
             candidate["source_type"] = "Jurisprudence CE"
         elif "courdecassation" in domain:
             candidate["source_type"] = "Jurisprudence Cass"
+        elif "opendata.justice-administrative" in domain:
+            candidate["source_type"] = "Jurisprudence TA/CAA"
         elif "conseil-constitutionnel" in domain:
             candidate["source_type"] = "Constitutionnel"
         elif "assemblee-nationale" in domain:
@@ -59,6 +70,8 @@ def agent_ranker(
             candidate["source_type"] = "Sénat"
         elif "europa.eu" in domain:
             candidate["source_type"] = "CJUE"
+        elif "justicelibre" in domain:
+            candidate["source_type"] = "Jurisprudence TA/CAA"
         else:
             candidate["source_type"] = "Autre"
         candidates.append(candidate)
@@ -92,7 +105,7 @@ def agent_ranker(
         "  • La source appartient à la même FAMILLE d'impôt que le diagnostic (ex: Flux/TVA vs Revenu/IR).\n"
         "  • La source est 'structurante' : elle définit l'assiette, le fait générateur ou la base d'imposition.\n"
         "  • La source est récente et est pertinente.\n"
-        "  • La source est une décision de jurisprudence (CE/Cass) citée comme structurante.\n"
+        "  • La source est une décision de jurisprudence (CE/CAA/TA/Cass) citée comme structurante.\n"
         "  • La source précise un seuil chiffré mentionné dans l'analyse.\n"
         "  • La source est un CJUE (site europa.eu) ET le titre ressemble à une référence .\n"
         "- keep = false si :\n"
@@ -128,23 +141,23 @@ def agent_ranker(
         "candidates": candidates
     }
 
-    # Appel OpenAI API
-    client = openai.OpenAI(api_key=openai_api_key)
+    # Appel LLM via la couche d'abstraction
     chat_messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": str(user_content)} # dump comme string simple, structure lisible
     ]
-    response = client.chat.completions.create(
-        model=model,
+    res = llm_call(
+        model,
         messages=chat_messages,
-        temperature=0,
-        response_format={"type": "json_object"},
+        json_mode=True,
         max_tokens=16384,
+        api_key=openai_api_key,
+        agent_name="ranker",
     )
     # Extraction du JSON "strict"
     import json
     from utils.json_utils import lire_json_beton
-    completion = response.choices[0].message.content
+    completion = res.text
     try:
         ranking = json.loads(completion)
     except Exception as exc:

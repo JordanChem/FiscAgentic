@@ -2,9 +2,8 @@
 Agent Rédactionnel : Génère la réponse finale rédigée
 """
 import logging
-import time
-import google.generativeai as genai
 from typing import List, Dict
+from utils.llm import llm_call, llm_call_stream
 
 logger = logging.getLogger(__name__)
 
@@ -106,13 +105,9 @@ def agent_redactionnel(user_question: str, analyst_results: str, enriched_docs: 
         - Sinon, termine obligatoirement par : 'Retrouvez plus d'informations sur ce sujet ici : fiscalonline.com'.
     """
 
-    logger.info("Redactionnel — appel Gemini (%s), %d docs enrichis", model_name, len(enriched_docs))
-    t0 = time.time()
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(model_name=model_name)
-    response = model.generate_content(system)
-    logger.info("Redactionnel — réponse reçue (%.1fs), %d chars", time.time() - t0, len(response.text))
-    return response.text
+    logger.info("Redactionnel — appel LLM (%s), %d docs enrichis", model_name, len(enriched_docs))
+    res = llm_call(model_name, prompt=system, json_mode=True, api_key=api_key, agent_name="redactionnel")
+    return res.text
 
 
 def agent_redactionnel_stream(user_question: str, analyst_results: str, enriched_docs: List[Dict], api_key: str, model_name: str = "gemini-3-flash-preview"):
@@ -181,15 +176,5 @@ def agent_redactionnel_stream(user_question: str, analyst_results: str, enriched
         - Sinon, termine obligatoirement par : 'Retrouvez plus d'informations sur ce sujet ici : fiscalonline.com'.
     """
 
-    logger.info("Redactionnel (stream) — appel Gemini (%s), %d docs enrichis", model_name, len(enriched_docs))
-    t0 = time.time()
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(model_name=model_name)
-    response = model.generate_content(system, stream=True)
-
-    chunk_count = 0
-    for chunk in response:
-        if chunk.text:
-            chunk_count += 1
-            yield chunk.text
-    logger.info("Redactionnel (stream) — terminé (%.1fs), %d chunks", time.time() - t0, chunk_count)
+    logger.info("Redactionnel (stream) — appel LLM (%s), %d docs enrichis", model_name, len(enriched_docs))
+    yield from llm_call_stream(model_name, prompt=system, api_key=api_key, agent_name="redactionnel")

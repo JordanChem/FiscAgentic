@@ -2,23 +2,17 @@
 Agents spécialisés : Identifient les sources juridiques pertinentes
 """
 import logging
-import time
-import google.generativeai as genai
 from typing import Dict, Any
+from utils.llm import llm_call
 
 logger = logging.getLogger(__name__)
 
 
 def _appel_gemini(system_prompt: str, api_key: str, model_name: str, agent_label: str = "") -> str:
-    """Helper partagé : configure Gemini, appelle generate_content, retourne le texte."""
+    """Helper partagé : délègue l'appel LLM à la couche d'abstraction (utils.llm)."""
     label = agent_label or "specialise"
-    logger.info("%s — appel Gemini (%s)", label, model_name)
-    t0 = time.time()
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(model_name=model_name)
-    response = model.generate_content(system_prompt)
-    logger.info("%s — réponse reçue (%.1fs), %d chars", label, time.time() - t0, len(response.text))
-    return response.text
+    res = llm_call(model_name, prompt=system_prompt, api_key=api_key, agent_name=label)
+    return res.text
 
 
 def agent_particulier_revenu(user_question: str, analyst_results:str, api_key: str, available_domain : list, model_name: str = "gemini-3-flash-preview") -> Dict[str, Any]:

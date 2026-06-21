@@ -32,9 +32,11 @@ def lire_json_beton(json_str):
                 text = match2.group(1).strip()
             else:
                 text = json_str.strip()
-        # Essai direct
+        # Essai direct. strict=False autorise les caractères de contrôle (retours à la
+        # ligne littéraux, tabulations) DANS les strings — fréquent quand un LLM met du
+        # markdown multi-lignes dans une valeur JSON (ex. reponse_redigee du rédactionnel).
         try:
-            return json.loads(text)
+            return json.loads(text, strict=False)
         except json.JSONDecodeError:
             pass
         # Essai après suppression de lignes parasites en début/fin
@@ -52,7 +54,7 @@ def lire_json_beton(json_str):
                 break
         subtext = "\n".join(lines[start_idx:end_idx])
         try:
-            return json.loads(subtext)
+            return json.loads(subtext, strict=False)
         except Exception:
             pass
         # Tentative de correction des quotes simples vers doubles
@@ -65,7 +67,7 @@ def lire_json_beton(json_str):
         if "{" in text and "}" in text:
             t2 = text[text.find("{"):text.rfind("}")+1]
             try:
-                return json.loads(t2)
+                return json.loads(t2, strict=False)
             except Exception:
                 pass
         # Échec final

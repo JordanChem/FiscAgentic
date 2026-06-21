@@ -2,8 +2,7 @@
 Agent Analyste : Analyse la question fiscale et identifie les concepts clés
 """
 import logging
-import time
-import google.generativeai as genai
+from utils.llm import llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +108,7 @@ def agent_analyste(user_question, api_key=None, model_name="gemini-3-flash-previ
     "    \"Facteurs de succès : [Éléments indispensables à la preuve]\",\n"
     "    \"Facteurs d'exclusion : [Éléments dont la présence bloque le régime]\"\n"
     "  ]\n"
-    "}," ,
+    "},"
     "  \"mecanismes_de_coordination\": [\"Sursis, report, articulation conventionnelle\"],\n"
     "  \"sources_historiques\": [\n"
     "    \"Loi n° [NUMÉRO] du [DATE], article [N] : [Description]\",\n"
@@ -140,10 +139,5 @@ def agent_analyste(user_question, api_key=None, model_name="gemini-3-flash-previ
     f"SITUATION UTILISATEUR :\n{user_question}\n"
 )
 
-    logger.info("Analyste — appel Gemini (%s), question: %r", model_name, user_question[:80])
-    t0 = time.time()
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(model_name=model_name)
-    response = model.generate_content(prompt)
-    logger.info("Analyste — réponse reçue (%.1fs), %d chars", time.time() - t0, len(response.text))
-    return response.text
+    res = llm_call(model_name, prompt=prompt, api_key=api_key, agent_name="analyste")
+    return res.text

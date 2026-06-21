@@ -37,7 +37,7 @@ from agents.suivi import agent_suivi
 
 # Imports des utilitaires
 from utils.json_utils import lire_json_beton
-from utils.search import search_official_sources, OFFICIAL_DOMAINS
+from utils.search import search_official_sources, search_with_fallback, OFFICIAL_DOMAINS
 from utils.scraper_utils import scrapper
 from utils.feedback import save_feedback, get_supabase_client
 from utils.conversations import save_conversation, list_conversations, load_conversation, delete_conversation
@@ -85,6 +85,8 @@ if 'processing' not in st.session_state:
 if 'active_domains' not in st.session_state:
     # Par défaut, tous les domaines sont actifs
     st.session_state.active_domains = OFFICIAL_DOMAINS.copy()
+if 'use_justicelibre' not in st.session_state:
+    st.session_state.use_justicelibre = True
 if 'feedbacks_sent' not in st.session_state:
     st.session_state.feedbacks_sent = set()
 if 'current_conversation_id' not in st.session_state:
@@ -138,9 +140,13 @@ def get_api_keys():
 
 
 def get_model_name(agent_name: str) -> str:
-    """Récupère le nom réel du modèle pour un agent donné"""
-    model_key = st.session_state.agent_models.get(agent_name, DEFAULT_MODELS.get(agent_name))
-    return MODEL_MAPPING.get(model_key, model_key)
+    """Récupère le nom LOGIQUE du modèle pour un agent donné.
+
+    La traduction nom logique → identifiant LiteLLM réel (avec préfixe provider)
+    est désormais centralisée dans utils.model_registry et appliquée par utils.llm.
+    On passe donc le nom logique tel quel aux agents.
+    """
+    return st.session_state.agent_models.get(agent_name, DEFAULT_MODELS.get(agent_name))
 
 
 def process_question(user_question: str, is_follow_up: bool = False, contexte: Dict = None) -> Dict:
@@ -332,16 +338,29 @@ def process_question(user_question: str, is_follow_up: bool = False, contexte: D
             len(full_queries), len(queries), len(l_experts_articles), len(jurisprudence_queries)
         )
 
-        # Étape 7 : Recherche SerpAPI
-        current_step = "Recherche des sources officielles (SerpAPI)"
+        # Étape 7 : Recherche sources (JusticeLibre MCP + SerpAPI)
+        use_jl = st.session_state.get('use_justicelibre', True)
+        current_step = "Recherche des sources officielles"
         status_text.text("🌐 Recherche des sources officielles...")
         progress_bar.progress(60)
-        # Utiliser les domaines actifs depuis la session state
         active_domains = st.session_state.get('active_domains', OFFICIAL_DOMAINS)
-        logger.info("[7/9] SerpAPI — %d requêtes sur %d domaines...", len(full_queries), len(active_domains))
+        logger.info(
+            "[7/9] Recherche — %d requêtes | JusticeLibre: %s | domaines SerpAPI: %d",
+            len(full_queries), "ON" if use_jl else "OFF", len(active_domains),
+        )
         t0 = time.time()
-        structured_results = search_official_sources(full_queries, serpapi_key, active_domains=active_domains)
-        logger.info("[7/9] SerpAPI OK (%.1fs) — %d résultats bruts", time.time() - t0, len(structured_results))
+        structured_results = search_with_fallback(
+            full_queries, serpapi_key,
+            active_domains=active_domains,
+            use_justicelibre=use_jl,
+            analyst_json=analyst_json,
+        )
+        n_jl = sum(1 for r in structured_results if r.get("_jl_source") == "justicelibre")
+        n_serp = len(structured_results) - n_jl
+        logger.info(
+            "[7/9] Recherche OK (%.1fs) — %d résultats bruts (JL: %d, SerpAPI: %d)",
+            time.time() - t0, len(structured_results), n_jl, n_serp,
+        )
 
         # Étape 8 : Suppression des doublons
         current_step = "Déduplication des résultats"
@@ -583,13 +602,29 @@ def main():
         
         # Mettre à jour les domaines actifs
         st.session_state.active_domains = active_domains
-        
+
         # Afficher le nombre de sources actives
         if active_domains:
             st.success(f"✅ {len(active_domains)} source(s) active(s)")
         else:
             st.warning("⚠️ Aucune source active. Activez au moins une source pour effectuer des recherches.")
-        
+
+        st.divider()
+
+        # JusticeLibre MCP
+        st.subheader("⚖️ JusticeLibre")
+        use_jl = st.toggle(
+            "Activer JusticeLibre (TA / CAA / CE / CJUE)",
+            value=st.session_state.use_justicelibre,
+            key="toggle_justicelibre",
+            help="Jurisprudence administrative gratuite (40 TA + 9 CAA + CE + CJUE). Fallback automatique sur SerpAPI si indisponible.",
+        )
+        st.session_state.use_justicelibre = use_jl
+        if use_jl:
+            st.caption("✅ Actif — CE/CAA/TA/CJUE via MCP, fallback SerpAPI auto")
+        else:
+            st.caption("⬜ Désactivé — SerpAPI seul")
+
         st.divider()
 
         # SECTION CHOIX DES MODÈLES — désactivée pour les utilisateurs finaux

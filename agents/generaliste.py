@@ -4,8 +4,9 @@ Agent Généraliste : Génère des requêtes de recherche optimisées
 import ast
 import logging
 import time
-import openai
 import datetime
+from utils.llm import llm_call
+from utils.json_utils import clean_json_codefence
 from utils.search import OFFICIAL_DOMAINS
 
 logger = logging.getLogger(__name__)
@@ -176,18 +177,18 @@ def agent_generaliste(user_query, openai_api_key, active_domains=None, model_nam
         f"Question utilisateur : {user_query}\n\n"
         "Respecte strictement l'ensemble des instructions ci-dessus."
     )
-    logger.info("Generaliste — appel OpenAI (%s), %d domaines actifs", model_name, len(active_domains) if active_domains else 0)
+    logger.info("Generaliste — appel LLM (%s), %d domaines actifs", model_name, len(active_domains) if active_domains else 0)
     t0 = time.time()
-    client = openai.OpenAI(api_key=openai_api_key)
-    response = client.chat.completions.create(
-        model=model_name,
-        messages=[
-            {"role": "system", "content": system_content},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0
+    res = llm_call(
+        model_name,
+        system=system_content,
+        prompt=prompt,
+        api_key=openai_api_key,
+        agent_name="generaliste",
     )
-    content = response.choices[0].message.content.strip()
+    # Certains modèles (Claude) enveloppent la liste dans un bloc ```python ... ``` :
+    # on retire le code-fence avant de parser.
+    content = clean_json_codefence(res.text.strip())
 
     # Extraction directe de la liste
     try:

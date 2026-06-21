@@ -27,6 +27,11 @@ def scrapper(ranked_keep: List[Dict]) -> List[Dict]:
         def _scrape_single(doc: Dict) -> Dict:
             """Scrape une URL unique avec fallback Firecrawl."""
             nonlocal firecrawl_client
+
+            # Contenu pré-rempli par JusticeLibre : pas de scraping nécessaire
+            if doc.get("content"):
+                return doc
+
             url = doc.get("url")
             content = ""
             source_method = None
@@ -49,26 +54,22 @@ def scrapper(ranked_keep: List[Dict]) -> List[Dict]:
                 if not content or 'requires JS' in content:
                     try:
                         if firecrawl_client is None:
-                            from firecrawl import Firecrawl
+                            from firecrawl import V1FirecrawlApp
                             api_key = os.getenv("FIRECRAWL_API_KEY")
                             if api_key:
-                                firecrawl_client = Firecrawl(api_key=api_key)
+                                firecrawl_client = V1FirecrawlApp(api_key=api_key)
                             else:
                                 logger.warning("FIRECRAWL_API_KEY not set, skipping fallback")
-                            
+
                         if firecrawl_client:
-                            # Retirer cid=... de l'URL si présent et ;jsessionid=... aussi
                             import re
                             cleaned_url = url
-                            # Enlever les paramètres jsessionid dans le path (ex : ;jsessionid=... )
                             cleaned_url = re.sub(r';jsessionid=[^/?&#]+', '', cleaned_url, flags=re.IGNORECASE)
-                            # Retirer le paramètre cid=... dans la query string
                             cleaned_url = re.sub(r'([&?])cid=[^&]+', lambda m: '?' if m.group(1) == '?' else '', cleaned_url)
-                            # Supprimer un ? en fin d'url restant 
                             cleaned_url = re.sub(r'\?$', '', cleaned_url)
-                            result = firecrawl_client.scrape(cleaned_url)
-                            if result and getattr(result, 'markdown'):
-                                content = getattr(result, 'markdown')
+                            result = firecrawl_client.scrape_url(cleaned_url, proxy='stealth')
+                            if result and result.markdown:
+                                content = result.markdown
                                 source_method = "Firecrawl"
                                 logger.info(f"Firecrawl fallback success for {cleaned_url}")
                     except Exception as e:

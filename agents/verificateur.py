@@ -2,9 +2,8 @@
 Agent Vérificateur : Vérifie et nettoie les sources identifiées
 """
 import logging
-import time
-import google.generativeai as genai
 from typing import Dict
+from utils.llm import llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +67,6 @@ def agent_verificateur(user_question: str, analyst_results: str, agents_outputs:
     )
 
     n_input = sum(len(v) for v in agents_outputs.values() if isinstance(v, list))
-    logger.info("Verificateur — %d sources en entrée, appel Gemini (%s)", n_input, model_name)
-    t0 = time.time()
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(model_name=model_name)
-    response = model.generate_content(system_prompt)
-    logger.info("Verificateur — réponse reçue (%.1fs), %d chars", time.time() - t0, len(response.text))
-    return response.text
+    logger.info("Verificateur — %d sources en entrée, appel LLM (%s)", n_input, model_name)
+    res = llm_call(model_name, prompt=system_prompt, api_key=api_key, agent_name="verificateur")
+    return res.text

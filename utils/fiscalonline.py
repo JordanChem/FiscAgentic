@@ -19,13 +19,13 @@ import html
 import logging
 import os
 
-import openai
 import pandas as pd
 import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 
 from utils.json_utils import clean_json_codefence
+from utils.llm import llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -114,16 +114,14 @@ Un dictionnaire Python
 Maintenant, traite la demande avec les entrées fournies.
 """
 
-    client = openai.OpenAI(api_key=api_key)
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "Tu es un expert en classification fiscale (droit fiscal français)."},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0,
+    res = llm_call(
+        "gpt-4o",
+        system="Tu es un expert en classification fiscale (droit fiscal français).",
+        prompt=prompt,
+        api_key=api_key,
+        agent_name="fiscalonline_tags",
     )
-    return response.choices[0].message.content
+    return res.text
 
 
 # ---------------------------------------------------------------------------
@@ -209,16 +207,14 @@ Sortie attendue : une liste python avec l'ID des articles
 Traite maintenant la demande.
 """
 
-    client = openai.OpenAI(api_key=api_key)
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "Tu es un agent expert en filtrage d'articles juridiques et fiscaux (droit fiscal français)."},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0,
+    res = llm_call(
+        "gpt-4o",
+        system="Tu es un agent expert en filtrage d'articles juridiques et fiscaux (droit fiscal français).",
+        prompt=prompt,
+        api_key=api_key,
+        agent_name="fiscalonline_ranker",
     )
-    return response.choices[0].message.content
+    return res.text
 
 
 # ---------------------------------------------------------------------------

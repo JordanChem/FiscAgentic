@@ -46,17 +46,22 @@ class LegalScraper:
     
     def __init__(self, delay: float = 0.3, timeout: int = 30):
         self.session = requests.Session()
-        self.session.headers.update( {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Cache-Control': 'max-age=0'
-    })
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Ch-Ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'max-age=0',
+        })
         self.delay = delay
         self.timeout = timeout
         
@@ -89,8 +94,13 @@ class LegalScraper:
             # Délai pour respecter les bonnes pratiques
             time.sleep(self.delay)
             
-            # Récupération de la page
-            response = self.session.get(url, timeout=self.timeout)
+            # Referer spécifique pour Légifrance (réduit les 403)
+            extra_headers = {}
+            if 'legifrance.gouv.fr' in url:
+                extra_headers['Referer'] = 'https://www.legifrance.gouv.fr/'
+                extra_headers['Sec-Fetch-Site'] = 'same-origin'
+
+            response = self.session.get(url, timeout=self.timeout, headers=extra_headers)
             response.raise_for_status()
             response.encoding = response.apparent_encoding
             

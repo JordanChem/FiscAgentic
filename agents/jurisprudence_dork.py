@@ -1,8 +1,7 @@
 """
 Agent Jurisprudence Dork : Génère des requêtes Google Dork ciblées sur la Cour de cassation
 """
-import ast
-import google.generativeai as genai
+from utils.llm import llm_call
 
 
 def generate_jurisprudence_dork(user_question, result_analyste, api_key, model_name="gemini-3-flash-preview"):
@@ -54,11 +53,8 @@ def generate_jurisprudence_dork(user_question, result_analyste, api_key, model_n
     """
 
     try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(model_name=model_name)
-        response = model.generate_content(user_prompt).text
-
-        return response
+        res = llm_call(model_name, prompt=user_prompt, api_key=api_key, agent_name="jurisprudence")
+        return res.text
 
     except Exception as e:
         return f"Erreur lors de la génération : {e}"

@@ -1,0 +1,4 @@
+id,question,domaine,elements_attendus,articles_attendus,notes
+q1,"Quel est le barème de l'impôt sur le revenu pour un célibataire ?",IR,"Barème progressif par tranches; Quotient familial d'une part; Décote éventuelle","article 197 du CGI; article 196 B du CGI","exemple — à remplacer par vos vraies lignes"
+q2,"Une SCI à l'IS peut-elle déduire l'amortissement de l'immeuble ?",IS,"Amortissement déductible à l'IS; Régime différent de la SCI à l'IR","article 39 du CGI; BOI-BIC-AMT-10","exemple"
+q3,"Conditions de l'abus de droit fiscal (montage artificiel) ?",PROCEDURE,"But exclusivement fiscal; Procédure de l'article L64 LPF; Majoration 80%","L. 64 LPF; BOI-CF-IOR-30","exemple"

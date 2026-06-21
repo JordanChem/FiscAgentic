@@ -1,5 +1,5 @@
 """
-Fonctions de recherche via SerpAPI
+Fonctions de recherche via SerpAPI, avec fallback JusticeLibre MCP pour la jurisprudence.
 """
 import logging
 import requests
@@ -8,6 +8,9 @@ from typing import List, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
+
+# Domaines couverts par JusticeLibre (retirés de SerpAPI quand JL est actif)
+JL_COVERED_DOMAINS = {"conseil-etat.fr", "courdecassation.fr", "europa.eu"}
 
 # Domaines officiels à cibler
 OFFICIAL_DOMAINS = [
@@ -19,7 +22,8 @@ OFFICIAL_DOMAINS = [
     "assemblee-nationale.fr",
     "senat.fr",
     "fiscalonline.fr",
-    "europa.eu"  # CJUE - Cour de Justice de l'Union Européenne
+    "europa.eu",  # CJUE - Cour de Justice de l'Union Européenne
+    "opendata.justice-administrative.fr",  # CAA + TA (fallback SerpAPI quand JL down)
 ]
 
 
@@ -103,3 +107,54 @@ def search_official_sources(
             results.extend(future.result())
 
     return results
+
+
+def search_with_fallback(
+    queries: List[str],
+    serpapi_key: str,
+    max_results_per_query: int = 3,
+    active_domains: List[str] = None,
+    use_justicelibre: bool = True,
+    analyst_json: dict = None,
+) -> List[Dict]:
+    """
+    Point d'entrée principal pour la recherche de sources.
+
+    - Si use_justicelibre=True et JusticeLibre est disponible :
+        • JL utilise analyst_json (axes + concepts T0) pour CE / CAA / TA / Cass
+        • SerpAPI couvre le reste (BOFiP, Légifrance, Assemblée, Sénat, fiscalonline…)
+    - Si JL est indisponible (down / timeout) : fallback automatique vers SerpAPI seul.
+    - Si use_justicelibre=False ou analyst_json absent : SerpAPI seul.
+    """
+    jl_results: List[Dict] = []
+    serp_domains = list(active_domains) if active_domains is not None else list(OFFICIAL_DOMAINS)
+
+    if use_justicelibre and analyst_json:
+        try:
+            from utils.justicelibre import MCPClient, is_jl_available, search_justicelibre
+            client = MCPClient(url="https://justicelibre.org/mcp")
+            client.initialize()
+            if is_jl_available(client):
+                jl_results = search_justicelibre(analyst_json, client)
+                # Retirer les domaines couverts par JL du scope SerpAPI
+                serp_domains = [d for d in serp_domains if d not in JL_COVERED_DOMAINS]
+                logger.info(
+                    "[search] JusticeLibre OK — %d résultats | SerpAPI sur %d domaines",
+                    len(jl_results), len(serp_domains),
+                )
+            else:
+                logger.warning("[search] JusticeLibre indisponible — fallback SerpAPI complet")
+        except Exception as exc:
+            logger.warning("[search] JusticeLibre erreur (%s) — fallback SerpAPI complet", exc)
+    elif use_justicelibre and not analyst_json:
+        logger.warning("[search] JusticeLibre activé mais analyst_json absent — SerpAPI seul")
+
+    serp_results: List[Dict] = []
+    if serp_domains:
+        serp_results = search_official_sources(
+            queries, serpapi_key,
+            max_results_per_query=max_results_per_query,
+            active_domains=serp_domains,
+        )
+
+    return jl_results + serp_results

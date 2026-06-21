@@ -52,3 +52,15 @@ Thumbs.db
 
 # Scraped content
 scraped_content/
+
+# Caches & sorties d'évaluation
+bofip_cache/
+eval/.cache/
+eval/comparison.csv
+eval/per_question_*.csv
+.deepeval/
+
+# Claude
+CLAUDE.md
+.claude
+.gstack/
