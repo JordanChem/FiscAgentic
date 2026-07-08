@@ -57,6 +57,35 @@ def _init_once() -> None:
     _INITIALISED = True
 
 
+# ─── Client Langfuse (SDK v2) pour l'instrumentation manuelle des étapes ──────
+# Le callback LiteLLM trace automatiquement les appels LLM ; le client SDK sert à
+# créer la trace parente + attacher des spans/événements aux étapes non-LLM
+# (recherche, dédup, scraping) et aux artefacts structurés (scores, sources…).
+_LANGFUSE_CLIENT = None
+_LANGFUSE_TRIED = False
+
+
+def _get_langfuse():
+    """Renvoie un client Langfuse singleton, ou None si non configuré/indisponible.
+
+    Langfuse est épinglé en v2 (compat callback LiteLLM + API Datasets de l'éval).
+    """
+    global _LANGFUSE_CLIENT, _LANGFUSE_TRIED
+    if _LANGFUSE_TRIED:
+        return _LANGFUSE_CLIENT
+    _LANGFUSE_TRIED = True
+    if not (os.getenv("LANGFUSE_PUBLIC_KEY") and os.getenv("LANGFUSE_SECRET_KEY")):
+        return None
+    try:
+        from langfuse import Langfuse  # import paresseux : dépendance optionnelle
+        _LANGFUSE_CLIENT = Langfuse()
+        logger.info("llm — client Langfuse (SDK v2) initialisé")
+    except Exception as exc:  # pragma: no cover
+        logger.warning("llm — client Langfuse indisponible : %s", exc)
+        _LANGFUSE_CLIENT = None
+    return _LANGFUSE_CLIENT
+
+
 # ─── Contexte de run (groupe les appels d'une question sous une trace) ────────
 @dataclass
 class CallRecord:
@@ -77,6 +106,9 @@ class RunContext:
     config_name: Optional[str] = None
     tags: List[str] = field(default_factory=list)
     records: List[CallRecord] = field(default_factory=list)
+    # Objet trace Langfuse (SDK v2) associé — permet d'attacher des spans/événements
+    # aux étapes non-LLM. `None` si Langfuse n'est pas configuré.
+    lf_trace: object = None
 
     @property
     def total_cost(self) -> float:
@@ -102,15 +134,37 @@ _run_ctx: ContextVar[Optional[RunContext]] = ContextVar("llm_run_ctx", default=N
 
 @contextmanager
 def llm_trace(trace_id: Optional[str] = None, session_id: Optional[str] = None,
-              config_name: Optional[str] = None, tags: Optional[List[str]] = None):
+              config_name: Optional[str] = None, tags: Optional[List[str]] = None,
+              name: Optional[str] = None, user_id: Optional[str] = None,
+              input: Optional[object] = None):
     """Groupe tous les `llm_call` du bloc sous une même trace Langfuse + collecte
-    les métriques par appel. Utilisé par le pipeline (un bloc = une question)."""
+    les métriques par appel. Utilisé par le pipeline (un bloc = une question).
+
+    Crée aussi l'objet trace Langfuse parent (si configuré) pour permettre
+    `trace_step` / `finalize_trace`. Le callback LiteLLM rattache ses générations
+    à la même trace via l'`id` partagé.
+    """
+    _init_once()  # garantit l'enregistrement du callback Langfuse de LiteLLM
     ctx = RunContext(
         trace_id=trace_id or f"fisca-{uuid.uuid4().hex[:12]}",
         session_id=session_id,
         config_name=config_name,
         tags=list(tags or []),
     )
+    lf = _get_langfuse()
+    if lf is not None:
+        try:
+            ctx.lf_trace = lf.trace(
+                id=ctx.trace_id,
+                name=name or "fisca-run",
+                session_id=session_id,
+                user_id=user_id,
+                input=input,
+                tags=ctx.tags or None,
+                metadata={"config_name": config_name} if config_name else None,
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.debug("llm — création trace Langfuse échouée : %s", exc)
     token = _run_ctx.set(ctx)
     try:
         yield ctx
@@ -120,6 +174,56 @@ def llm_trace(trace_id: Optional[str] = None, session_id: Optional[str] = None,
 
 def current_run() -> Optional[RunContext]:
     return _run_ctx.get()
+
+
+def trace_step(name: str, *, input: Optional[object] = None,
+               output: Optional[object] = None, metadata: Optional[dict] = None,
+               level: Optional[str] = None) -> None:
+    """Attache un événement (étape non-LLM / artefact structuré) à la trace courante.
+
+    No-op si aucune trace n'est active ou si Langfuse n'est pas configuré.
+    L'observabilité ne doit jamais casser le pipeline → tout est encapsulé.
+    """
+    ctx = _run_ctx.get()
+    if ctx is None or ctx.lf_trace is None:
+        return
+    try:
+        kwargs = {"name": name, "input": input, "output": output, "metadata": metadata}
+        if level is not None:
+            kwargs["level"] = level
+        ctx.lf_trace.event(**kwargs)
+    except Exception as exc:  # pragma: no cover
+        logger.debug("llm — trace_step '%s' échoué : %s", name, exc)
+
+
+def finalize_trace(output: Optional[object] = None,
+                   metadata: Optional[dict] = None) -> None:
+    """Finalise la trace courante : renseigne l'`output` + les métriques agrégées,
+    puis force l'envoi (`flush`). À appeler tant que la trace est encore active
+    (dans le bloc `with llm_trace(...)`). No-op si Langfuse absent.
+    """
+    ctx = _run_ctx.get()
+    if ctx is None:
+        return
+    if ctx.lf_trace is not None:
+        try:
+            md = {
+                "total_cost_usd": ctx.total_cost,
+                "total_input_tokens": ctx.total_input_tokens,
+                "total_output_tokens": ctx.total_output_tokens,
+                "cost_by_agent": ctx.cost_by_agent(),
+            }
+            if metadata:
+                md.update(metadata)
+            ctx.lf_trace.update(output=output, metadata=md)
+        except Exception as exc:  # pragma: no cover
+            logger.debug("llm — finalize_trace échoué : %s", exc)
+    lf = _get_langfuse()
+    if lf is not None:
+        try:
+            lf.flush()
+        except Exception:  # pragma: no cover
+            pass
 
 
 # ─── Réponse normalisée ───────────────────────────────────────────────────────

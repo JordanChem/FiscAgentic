@@ -19,6 +19,7 @@ import ast
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -38,7 +39,7 @@ from agents.redactionnel import agent_redactionnel
 from utils.json_utils import lire_json_beton, clean_json_codefence
 from utils.search import search_with_fallback, OFFICIAL_DOMAINS
 from utils.scraper_utils import scrapper
-from utils.llm import llm_trace
+from utils.llm import llm_trace, trace_step, finalize_trace
 from utils.api_keys import get_api_keys
 
 logger = logging.getLogger(__name__)
@@ -119,7 +120,7 @@ def run_pipeline(
     timings: Dict[str, float] = {}
     t_total = time.time()
 
-    with llm_trace(config_name=config_name,
+    with llm_trace(name="fisca-question", input=question, config_name=config_name,
                    tags=["pipeline", config_name or "default"]) as ctx:
         try:
             # 1. Analyste
@@ -135,8 +136,11 @@ def run_pipeline(
             )
             selected_agents = routing.get("selected_agents", [])
             timings["orchestrateur"] = time.time() - t0
+            trace_step("routage", output={"selected_agents": selected_agents,
+                                          "scores": routing.get("scores", {})})
 
             if not selected_agents:
+                finalize_trace(output="Aucun agent sélectionné — question hors périmètre fiscal.")
                 return _empty_result(
                     question, models, config_name, ctx, timings, t_total, analyst_json,
                     answer="Aucun agent sélectionné — question hors périmètre fiscal.",
@@ -153,11 +157,19 @@ def run_pipeline(
                                 available_domain=active_domains,
                                 model_name=models["specialises"])
 
+            # copy_context().run propage la trace LLM aux workers (sinon générations
+            # spécialistes orphelines + coûts non agrégés dans le RunContext).
+            # IMPORTANT : copy_context() doit être évalué ICI (thread principal) — via
+            # submit, pas dans un lambda passé à map() qui s'exécuterait côté worker.
             with ThreadPoolExecutor(max_workers=max(1, len(valid_agents))) as ex:
-                for name, res in ex.map(_call, valid_agents):
+                futures = [ex.submit(copy_context().run, _call, n) for n in valid_agents]
+                for fut in futures:
+                    name, res = fut.result()
                     if res:
                         results[name] = res
             timings["specialises"] = time.time() - t0
+            trace_step("specialistes", output={n: results.get(n) for n in valid_agents},
+                       metadata={"repondants": list(results.keys()), "demandes": valid_agents})
 
             # 4. Vérificateur
             t0 = time.time()
@@ -165,11 +177,13 @@ def run_pipeline(
                 agent_verificateur(question, result_analyste, results, google_key, model_name=models["verificateur"])
             )
             timings["verificateur"] = time.time() - t0
+            trace_step("verification", output=verified_sources)
 
             # 5. Généraliste
             t0 = time.time()
             queries = agent_generaliste(question, openai_key, active_domains=active_domains, model_name=models["generaliste"])
             timings["generaliste"] = time.time() - t0
+            trace_step("requetes_generaliste", output=queries, metadata={"n_requetes": len(queries)})
 
             # 5b. Jurisprudence dork
             t0 = time.time()
@@ -197,6 +211,8 @@ def run_pipeline(
                 analyst_json=analyst_json,
             )
             timings["search"] = time.time() - t0
+            trace_step("recherche", metadata={"n_requetes": len(full_queries),
+                                              "n_resultats_bruts": len(structured_results)})
 
             # 8. Déduplication
             seen, unique = set(), []
@@ -205,6 +221,8 @@ def run_pipeline(
                 if url and url not in seen:
                     unique.append(r)
                     seen.add(url)
+            trace_step("deduplication", metadata={"avant": len(structured_results),
+                                                  "apres": len(unique)})
 
             # 9. Ranker
             t0 = time.time()
@@ -213,11 +231,20 @@ def run_pipeline(
             if not ranked_keep:
                 ranked_keep = [x for x in ranked if x.get("keep") and x.get("score", 0) >= 0.6]
             timings["ranker"] = time.time() - t0
+            trace_step(
+                "ranking",
+                output=[{"url": x.get("url"), "score": x.get("score"), "reason": x.get("reason")} for x in ranked_keep],
+                metadata={"candidats": len(unique), "retenues": len(ranked_keep)},
+            )
 
             # 10. Scraping (non-LLM)
             t0 = time.time()
             doc_enriched = scrapper(ranked_keep)
             timings["scraping"] = time.time() - t0
+            trace_step("scraping", metadata={
+                "urls_avec_contenu": sum(1 for d in doc_enriched if d.get("content")),
+                "urls_total": len(doc_enriched),
+            })
 
             # 11. Rédactionnel (non-streamé : on a besoin du texte complet pour la notation)
             t0 = time.time()
@@ -238,6 +265,7 @@ def run_pipeline(
                 )
             scraped_context = [d.get("content", "") for d in doc_enriched if d.get("content")]
 
+            finalize_trace(output=answer_text)
             return PipelineResult(
                 question=question,
                 answer_text=answer_text,
@@ -262,6 +290,7 @@ def run_pipeline(
 
         except Exception as exc:
             logger.exception("run_pipeline — échec sur la question : %r", question[:80])
+            finalize_trace(metadata={"error": f"{type(exc).__name__}: {exc}"})
             return PipelineResult(
                 question=question, answer_text="", points_cles=[], analyste={},
                 sources=[], scraped_context=[], selected_agents=[],

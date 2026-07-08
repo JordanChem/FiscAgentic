@@ -8,6 +8,7 @@ import uuid
 import logging
 from typing import Dict, List
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextvars import copy_context
 import time
 from dotenv import load_dotenv
 
@@ -37,6 +38,7 @@ from agents.suivi import agent_suivi
 
 # Imports des utilitaires
 from utils.json_utils import lire_json_beton
+from utils.llm import llm_trace, trace_step, finalize_trace
 from utils.search import search_official_sources, search_with_fallback, OFFICIAL_DOMAINS
 from utils.scraper_utils import scrapper
 from utils.feedback import save_feedback, get_supabase_client
@@ -209,8 +211,10 @@ def process_question(user_question: str, is_follow_up: bool = False, contexte: D
         _fiscalonline_future = None
         if "fiscalonline.fr" in st.session_state.get('active_domains', []):
             _fiscalonline_executor = ThreadPoolExecutor(max_workers=1)
+            # copy_context() propage la trace LLM courante au thread worker (sinon la
+            # ContextVar ne franchit pas la frontière de thread → générations orphelines).
             _fiscalonline_future = _fiscalonline_executor.submit(
-                main_fiscalonline, user_question, result_analyste, openai_key
+                copy_context().run, main_fiscalonline, user_question, result_analyste, openai_key
             )
 
         # Étape 2 : Agent Orchestrateur
@@ -232,6 +236,7 @@ def process_question(user_question: str, is_follow_up: bool = False, contexte: D
         )
         for agent_name, score in sorted(scores.items(), key=lambda x: x[1], reverse=True):
             logger.info("       score %-35s %.2f", agent_name, score)
+        trace_step("routage", output={"selected_agents": selected_agents, "scores": scores})
 
         # Étape 3 : Agents spécialisés
         current_step = "Consultation des agents spécialisés"
@@ -274,7 +279,10 @@ def process_question(user_question: str, is_follow_up: bool = False, contexte: D
             return agent_name, None
 
         with ThreadPoolExecutor(max_workers=max(1, len(valid_agents))) as executor:
-            futures = {executor.submit(_call_specialist, name): name for name in valid_agents}
+            # copy_context().run propage la trace LLM courante à chaque worker : sans
+            # ça, les 11 générations spécialistes seraient orphelines (ContextVar non
+            # héritée par les threads) et leur coût non agrégé.
+            futures = {executor.submit(copy_context().run, _call_specialist, name): name for name in valid_agents}
             for future in as_completed(futures):
                 agent_name, result = future.result()
                 if result is not None:
@@ -284,6 +292,8 @@ def process_question(user_question: str, is_follow_up: bool = False, contexte: D
                     logger.warning("       [3/9] %s — résultat vide", agent_name)
 
         logger.info("[3/9] Agents spécialisés OK (%.1fs) — %d/%d agents ont répondu", time.time() - t0, len(results), len(valid_agents))
+        trace_step("specialistes", output={name: results.get(name) for name in valid_agents},
+                   metadata={"repondants": list(results.keys()), "demandes": valid_agents})
 
         # Étape 4 : Agent Vérificateur
         current_step = "Vérification des sources"
@@ -296,6 +306,7 @@ def process_question(user_question: str, is_follow_up: bool = False, contexte: D
         verified_sources = lire_json_beton(result_clean)
         total_verified = sum(len(v) for v in verified_sources.values() if isinstance(v, list))
         logger.info("[4/9] Vérificateur OK (%.1fs) — %d sources vérifiées", time.time() - t0, total_verified)
+        trace_step("verification", output=verified_sources, metadata={"total_sources": total_verified})
 
         # Étape 5 : Agent Généraliste (requêtes de recherche)
         current_step = "Génération des requêtes de recherche"
@@ -308,6 +319,7 @@ def process_question(user_question: str, is_follow_up: bool = False, contexte: D
         t0 = time.time()
         queries = agent_generaliste(user_question, openai_key, active_domains=active_domains, model_name=model_generaliste)
         logger.info("[5/9] Généraliste OK (%.1fs) — %d requêtes générées", time.time() - t0, len(queries))
+        trace_step("requetes_generaliste", output=queries, metadata={"n_requetes": len(queries)})
 
         # Étape 5bis : Recherche jurisprudence Cour de cassation
         current_step = "Recherche jurisprudence"
@@ -325,6 +337,8 @@ def process_question(user_question: str, is_follow_up: bool = False, contexte: D
         except Exception:
             jurisprudence_queries = []
         logger.info("[5b] Jurisprudence dork OK (%.1fs) — %d requêtes", time.time() - t0, len(jurisprudence_queries))
+        trace_step("requetes_jurisprudence", output=jurisprudence_queries,
+                   metadata={"n_requetes": len(jurisprudence_queries)})
 
         # Étape 6 : Concaténation des sources
         l_experts_articles = []
@@ -361,6 +375,10 @@ def process_question(user_question: str, is_follow_up: bool = False, contexte: D
             "[7/9] Recherche OK (%.1fs) — %d résultats bruts (JL: %d, SerpAPI: %d)",
             time.time() - t0, len(structured_results), n_jl, n_serp,
         )
+        trace_step("recherche", metadata={
+            "n_requetes": len(full_queries), "n_resultats_bruts": len(structured_results),
+            "justicelibre": n_jl, "serpapi": n_serp, "use_justicelibre": use_jl,
+        })
 
         # Étape 8 : Suppression des doublons
         current_step = "Déduplication des résultats"
@@ -372,6 +390,9 @@ def process_question(user_question: str, is_follow_up: bool = False, contexte: D
                 unique_structured_results.append(res)
                 seen_urls.add(url)
         logger.info("[8/9] Déduplication: %d → %d résultats uniques", len(structured_results), len(unique_structured_results))
+        trace_step("deduplication", metadata={
+            "avant": len(structured_results), "apres": len(unique_structured_results),
+        })
 
         # Étape 9 : Ranking
         current_step = "Classement des sources"
@@ -405,6 +426,11 @@ def process_question(user_question: str, is_follow_up: bool = False, contexte: D
             logger.warning("Seuil 0.8 → 0 résultats, fallback seuil 0.6 → %d résultats", len(ranked_keep))
         else:
             logger.info("Filtrage seuil 0.8 → %d sources retenues", len(ranked_keep))
+        trace_step(
+            "ranking",
+            output=[{"url": x.get("url"), "score": x.get("score"), "reason": x.get("reason")} for x in ranked_keep],
+            metadata={"keep_08": n_keep_08, "keep_06": n_keep_06, "drop": n_drop, "retenues": len(ranked_keep)},
+        )
 
         # Étape 10 : Scraping
         current_step = "Extraction du contenu des sources"
@@ -415,6 +441,7 @@ def process_question(user_question: str, is_follow_up: bool = False, contexte: D
         doc_enriched = scrapper(ranked_keep)
         n_ok = sum(1 for d in doc_enriched if d.get("content"))
         logger.info("[10] Scraping OK (%.1fs) — %d/%d URLs avec contenu", time.time() - t0, n_ok, len(doc_enriched))
+        trace_step("scraping", metadata={"urls_avec_contenu": n_ok, "urls_total": len(doc_enriched)})
 
         # Fusion avec les articles FiscalOnline récupérés en parallèle
         doc_fiscalonline = []
@@ -461,7 +488,8 @@ def process_question(user_question: str, is_follow_up: bool = False, contexte: D
 
 
 def render_feedback(message_id: str, question: str, answer: str,
-                    sources_count: int = 0, is_follow_up: bool = False):
+                    sources_count: int = 0, is_follow_up: bool = False,
+                    trace_id: str = None):
     """Affiche le widget de feedback sous une réponse assistant"""
     already_sent = message_id in st.session_state.feedbacks_sent
 
@@ -482,14 +510,14 @@ def render_feedback(message_id: str, question: str, answer: str,
             if st.button("Envoyer", key=f"send_{message_id}"):
                 ok = save_feedback(question, answer, rating=0, comment=comment or None,
                                    sources_count=sources_count, is_follow_up=is_follow_up,
-                                   user_email=st.session_state.user_email)
+                                   user_email=st.session_state.user_email, trace_id=trace_id)
                 if ok:
                     st.session_state.feedbacks_sent.add(message_id)
                     st.rerun()
         else:
             ok = save_feedback(question, answer, rating=1,
                                sources_count=sources_count, is_follow_up=is_follow_up,
-                               user_email=st.session_state.user_email)
+                               user_email=st.session_state.user_email, trace_id=trace_id)
             if ok:
                 st.session_state.feedbacks_sent.add(message_id)
                 st.rerun()
@@ -773,7 +801,8 @@ def main():
                     question=question_text,
                     answer=message["content"],
                     sources_count=len(message.get("sources", [])),
-                    is_follow_up=i > 2
+                    is_follow_up=i > 2,
+                    trace_id=message.get("trace_id")
                 )
     
     # Zone de saisie de chat
@@ -783,15 +812,29 @@ def main():
         
         # Déterminer si c'est une question de suivi
         is_follow_up = st.session_state.contexte_conversation is not None and len(st.session_state.messages) > 1
-        
-        # Traiter la question
+
+        # Id de conversation stable AVANT d'ouvrir la trace : sert de session_id
+        # Langfuse (regroupe toutes les questions/suivis d'une conversation).
+        # auto_save_conversation() réutilise ce même id (ne le régénère que si None).
+        if not st.session_state.current_conversation_id:
+            st.session_state.current_conversation_id = str(uuid.uuid4())
+
+        # Traiter la question — la trace englobe process_question ET la consommation
+        # du stream rédactionnel (st.write_stream plus bas), qui s'exécute hors de
+        # process_question : le `with` doit rester ouvert pendant tout le streaming.
         with st.chat_message("assistant"):
-            with st.spinner("Réflexion en cours..."):
+            with st.spinner("Réflexion en cours..."), llm_trace(
+                name="fisca-question",
+                input=prompt,
+                session_id=st.session_state.current_conversation_id,
+                user_id=st.session_state.user_email,
+                tags=["follow-up"] if is_follow_up else ["question"],
+            ) as trace_ctx:
                 if is_follow_up:
                     result = process_question(prompt, is_follow_up=True, contexte=st.session_state.contexte_conversation)
                 else:
                     result = process_question(prompt, is_follow_up=False)
-                
+
                 if result:
                     sources = result.get("sources", [])
 
@@ -843,11 +886,16 @@ def main():
                     message_content = reponse_redigee if isinstance(reponse_data, dict) else reponse_data
                     if isinstance(message_content, dict):
                         message_content = message_content.get("reponse_redigee", str(message_content))
+                    # Finaliser la trace (output + métriques agrégées + flush) tant
+                    # que le contexte est encore actif dans ce bloc `with`.
+                    finalize_trace(output=message_content)
+
                     st.session_state.messages.append({
                         "role": "assistant",
                         "content": message_content,
                         "sources": sources,
-                        "id": str(uuid.uuid4())
+                        "id": str(uuid.uuid4()),
+                        "trace_id": trace_ctx.trace_id  # pour rattacher le feedback
                     })
 
                     # Mettre à jour le contexte de conversation (seulement pour la première question)
@@ -864,11 +912,13 @@ def main():
                     auto_save_conversation()
                 else:
                     error_msg = "Désolé, une erreur s'est produite lors du traitement de votre question."
+                    finalize_trace(output=error_msg, metadata={"error": True})
                     st.error(error_msg)
                     st.session_state.messages.append({
                         "role": "assistant",
                         "content": error_msg,
-                        "id": str(uuid.uuid4())
+                        "id": str(uuid.uuid4()),
+                        "trace_id": trace_ctx.trace_id
                     })
                     auto_save_conversation()
 

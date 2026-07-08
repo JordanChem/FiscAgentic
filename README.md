@@ -121,6 +121,15 @@ Le pipeline dispose d'un système d'évaluation (golden dataset + comparaison de
 Tous les appels LLM passent par une couche unique [utils/llm.py](utils/llm.py) (LiteLLM :
 Gemini / OpenAI / **Anthropic**) qui capture coût/tokens/latence et trace vers Langfuse.
 
+**Traçage bout-en-bout (app live + éval).** Si `LANGFUSE_*` est configuré, chaque question
+produit **une trace** dans Langfuse : une génération par agent (analyste, orchestrateur,
+spécialistes, vérificateur, généraliste, jurisprudence, ranker, rédactionnel) avec
+entrée/sortie/coût/latence, regroupée par **session utilisateur** (= conversation), plus des
+**spans** pour les étapes non-LLM (recherche, dédup, scraping) et les artefacts structurés
+(scores de routage, sources vérifiées, distribution du ranking). Le **👍/👎** utilisateur est
+attaché en score `user_feedback` → filtrer les traces mal notées pour améliorer la qualité.
+Sans clés Langfuse, tout fonctionne à l'identique (aucune trace émise).
+
 📖 **Mode d'emploi pas-à-pas** : [eval/GUIDE.md](eval/GUIDE.md) — lancer une question (avec/sans
 éval), où voir les résultats, dashboards (Confident AI / Langfuse), changer les modèles.
 🏗️ **Architecture du système d'éval** : [eval/README.md](eval/README.md).
