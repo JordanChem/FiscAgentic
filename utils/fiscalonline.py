@@ -29,7 +29,7 @@ from utils.llm import llm_call
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "https://api-preprod-fiscalonline.stoati.fr"
+BASE_URL = "https://api.fiscalonline.com"
 
 
 def _get_fiscalonline_token() -> str:
