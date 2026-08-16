@@ -1,12 +1,13 @@
 """
 Module de persistance des conversations avec Supabase
 """
-import uuid
+import logging
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-import streamlit as st
-from utils.feedback import get_supabase_client
+from services.supabase import get_supabase_client
+
+logger = logging.getLogger(__name__)
 
 
 def _strip_heavy_content(sources: List[Dict]) -> List[Dict]:
@@ -83,7 +84,7 @@ def save_conversation(
         client.table("conversations").upsert(data).execute()
         return True
     except Exception as e:
-        print(f"Erreur sauvegarde conversation: {e}")
+        logger.error("Erreur sauvegarde conversation %s : %s", conversation_id, e)
         return False
 
 
@@ -104,7 +105,7 @@ def list_conversations(limit: int = 15, user_email: Optional[str] = None) -> Lis
         response = query.order("updated_at", desc=True).limit(limit).execute()
         return response.data or []
     except Exception as e:
-        print(f"Erreur listing conversations: {e}")
+        logger.error("Erreur listing conversations : %s", e)
         return []
 
 
@@ -126,7 +127,7 @@ def load_conversation(conversation_id: str, user_email: Optional[str] = None) ->
         response = query.single().execute()
         return response.data
     except Exception as e:
-        print(f"Erreur chargement conversation: {e}")
+        logger.info("Conversation %s introuvable pour cet utilisateur : %s", conversation_id, e)
         return None
 
 
@@ -145,5 +146,5 @@ def delete_conversation(conversation_id: str, user_email: Optional[str] = None) 
         query.execute()
         return True
     except Exception as e:
-        print(f"Erreur suppression conversation: {e}")
+        logger.error("Erreur suppression conversation %s : %s", conversation_id, e)
         return False

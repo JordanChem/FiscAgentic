@@ -1,0 +1,38 @@
+[Unit]
+Description=Assistant Fiscal — API (pipeline multi-agents)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=fisca
+Group=fisca
+WorkingDirectory=/opt/fisca-api
+EnvironmentFile=/etc/fisca-api/env
+ExecStart=/opt/fisca-api/venv/bin/gunicorn api.main:app -c deploy/gunicorn_conf.py
+ExecReload=/bin/kill -s HUP $MAINPID
+
+# Redémarrage automatique, sauf arrêt volontaire.
+Restart=on-failure
+RestartSec=5s
+
+# Laisse les pipelines en cours se terminer (le lifespan attend le pool).
+KillSignal=SIGTERM
+TimeoutStopSec=180
+
+# Durcissement.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/fisca-api/bofip_cache
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fisca-api
+
+[Install]
+WantedBy=multi-user.target

@@ -8,7 +8,24 @@ Agents disponibles (clés) : analyste, orchestrateur, specialises, verificateur,
 generaliste, jurisprudence, ranker, redactionnel.
 Les noms logiques doivent exister dans utils/model_registry.MODEL_REGISTRY.
 """
-from pipeline.core import DEFAULT_MODELS
+# Base de référence de l'évaluation, **figée volontairement**.
+#
+# Elle valait autrefois `pipeline.core.DEFAULT_MODELS`. Depuis que ce dict porte
+# la configuration de *production* (Claude), l'importer ferait dériver toutes les
+# configs à chaque changement de modèle en prod — et comme `eval/cache.py` hashe
+# `models_config`, cela invaliderait tout le cache disque et imposerait un
+# recalcul complet du golden set. La base d'éval est donc indépendante : la faire
+# évoluer devient une décision explicite.
+DEFAULT_MODELS = {
+    "analyste":      "gemini-2.5-flash",
+    "generaliste":   "gpt-4o",
+    "jurisprudence": "gemini-2.5-flash",
+    "orchestrateur": "gpt-4o",
+    "ranker":        "gpt-4o",
+    "redactionnel":  "gemini-2.5-flash",
+    "specialises":   "gemini-2.5-flash",
+    "verificateur":  "gemini-2.5-flash",
+}
 
 # Sous-ensembles d'agents par provider (pour construire des configs homogènes).
 _GEMINI_AGENTS = ["analyste", "specialises", "verificateur", "jurisprudence", "redactionnel"]

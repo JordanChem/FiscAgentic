@@ -33,6 +33,15 @@ logger = logging.getLogger(__name__)
 # préfère renvoyer ce qu'on a plutôt que crasher le pipeline.
 litellm.drop_params = True  # ignore les params non supportés par un provider donné
 
+# Budgets d'appel. Sans eux, un appel qui ne rend jamais la main immobilise un
+# slot de pipeline indéfiniment : un run de recette a vu l'orchestrateur bloqué
+# 290 s sur un seul appel — un délai que rien n'aurait interrompu.
+LLM_TIMEOUT_S = float(os.getenv("LLM_TIMEOUT_S", "90"))
+LLM_STREAM_TIMEOUT_S = float(os.getenv("LLM_STREAM_TIMEOUT_S", "180"))
+# Une seule reprise : à 2 reprises, le pire cas d'un seul agent (3 × 90 s)
+# consommerait à lui seul la moitié du budget global de la requête.
+LLM_NUM_RETRIES = int(os.getenv("LLM_NUM_RETRIES", "1"))
+
 # ─── Init tarifs custom + callback Langfuse (une seule fois) ──────────────────
 _INITIALISED = False
 
@@ -369,6 +378,8 @@ def llm_call(
         kwargs["response_format"] = {"type": "json_object"}
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
+    kwargs["timeout"] = LLM_TIMEOUT_S
+    kwargs["num_retries"] = LLM_NUM_RETRIES
     # Clé choisie selon le PROVIDER du modèle (et non l'api_key passé par l'agent,
     # qui correspond au provider d'origine et serait faux après bascule de modèle).
     resolved_key = _resolve_api_key(provider_of(model_name), api_key)
@@ -410,6 +421,9 @@ def llm_call_stream(
         "stream": True,
         "stream_options": {"include_usage": True},
         "metadata": _langfuse_metadata(agent_name),
+        # Budget plus large qu'un appel bloquant : la rédaction produit un
+        # document long, et le timeout porte sur l'inactivité du flux.
+        "timeout": LLM_STREAM_TIMEOUT_S,
     }
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}

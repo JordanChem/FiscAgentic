@@ -62,8 +62,11 @@ def run_pipeline_cached(
             logger.warning("cache illisible (%s), recalcul : %s", path, exc)
 
     logger.info("cache MISS — exécution pipeline (%s)", config_name or "default")
+    # use_fiscalonline=False : l'évaluation mesure le pipeline sur sources publiques
+    # (c'était le comportement historique de `run_pipeline`). L'activer changerait
+    # les réponses ET la clé de cache — ce serait une décision d'évaluation à part.
     result = run_pipeline(question, models_config, use_justicelibre=use_justicelibre,
-                          config_name=config_name)
+                          config_name=config_name, use_fiscalonline=False)
     # On ne met en cache que les exécutions réussies (réponse non vide, pas d'erreur).
     if not result.error and result.answer_text:
         try:

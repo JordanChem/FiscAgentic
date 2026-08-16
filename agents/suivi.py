@@ -16,6 +16,7 @@ def agent_suivi(user_question: str, contexte_conversation: Dict, api_key: str, m
             - reponse_initial: La réponse initiale
             - sources: Les sources trouvées
             - analyse: L'analyse de l'agent analyste
+            - historique: Les échanges de suivi déjà intervenus (optionnel)
         api_key: Clé API Google
         model_name: Nom du modèle à utiliser. Par défaut "gemini-3-flash-preview".
     
@@ -27,7 +28,8 @@ def agent_suivi(user_question: str, contexte_conversation: Dict, api_key: str, m
     reponse_initial = contexte_conversation.get("reponse_initial", "")
     sources = contexte_conversation.get("sources", [])
     analyse = contexte_conversation.get("analyse", {})
-    
+    historique = contexte_conversation.get("historique", [])
+
     # Construire le contexte des sources
     sources_context = ""
     if sources:
@@ -35,7 +37,16 @@ def agent_suivi(user_question: str, contexte_conversation: Dict, api_key: str, m
         for idx, source in enumerate(sources[:5], 1):  # Limiter à 5 sources pour le contexte
             sources_list.append(f"{idx}. {source.get('title', 'Sans titre')} - {source.get('url', '')}")
         sources_context = "\n".join(sources_list)
-    
+
+    # Échanges de suivi déjà intervenus : sans eux, chaque suivi repartirait de la
+    # seule question initiale et ignorerait les précisions déjà apportées.
+    historique_context = ""
+    if historique:
+        historique_context = "\n\n".join(
+            f"— Q : {tour.get('question', '')}\n  R : {tour.get('reponse', '')}"
+            for tour in historique
+        )
+
     system_prompt = f"""
         Tu es un Expert Fiscaliste Senior assistant conversationnel. Ta mission est de répondre aux questions de suivi de l'utilisateur en te basant sur le contexte de la conversation précédente.
 
@@ -52,7 +63,10 @@ def agent_suivi(user_question: str, contexte_conversation: Dict, api_key: str, m
         
         Analyse technique initiale :
         {analyse}
-        
+
+        Échanges de suivi déjà intervenus :
+        {historique_context if historique_context else "Aucun"}
+
         ---
         
         🧠 TA MISSION

@@ -2,12 +2,24 @@
 Fonctions de recherche via SerpAPI, avec fallback JusticeLibre MCP pour la jurisprudence.
 """
 import logging
+import os
 import requests
 from urllib.parse import urlparse
 from typing import List, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
+
+# Taille du pool de requêtes SerpAPI. Sous FastAPI, plusieurs pipelines tournent
+# en parallèle : ce plafond borne le nombre total de threads du process.
+SEARCH_MAX_WORKERS = int(os.getenv("SEARCH_MAX_WORKERS", "8"))
+
+# (connect, read) — sans timeout, une socket SerpAPI bloquée immobilise
+# un worker (et donc un slot de pipeline) indéfiniment.
+SERPAPI_TIMEOUT = (
+    float(os.getenv("SERPAPI_CONNECT_TIMEOUT", "5")),
+    float(os.getenv("SERPAPI_READ_TIMEOUT", "20")),
+)
 
 # Domaines couverts par JusticeLibre (retirés de SerpAPI quand JL est actif)
 JL_COVERED_DOMAINS = {"conseil-etat.fr", "courdecassation.fr", "europa.eu"}
@@ -74,7 +86,7 @@ def search_official_sources(
         }
         query_results = []
         try:
-            resp = requests.get(endpoint, params=params)
+            resp = requests.get(endpoint, params=params, timeout=SERPAPI_TIMEOUT)
             resp.raise_for_status()
             data = resp.json()
         except Exception as exc:
@@ -101,7 +113,7 @@ def search_official_sources(
         return query_results
 
     # Exécution parallèle des requêtes
-    with ThreadPoolExecutor(max_workers=min(8, max(1, len(queries)))) as executor:
+    with ThreadPoolExecutor(max_workers=min(SEARCH_MAX_WORKERS, max(1, len(queries)))) as executor:
         futures = {executor.submit(_search_single_query, q): q for q in queries}
         for future in as_completed(futures):
             results.extend(future.result())

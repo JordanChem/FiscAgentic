@@ -4,24 +4,47 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a French tax assistant (Assistant Fiscal Intelligent) - a Streamlit application that answers French tax questions using AI agents and official legal sources. The application uses a multi-agent architecture to analyze questions, search official sources, and generate comprehensive answers with legal references.
+This is a French tax assistant (Assistant Fiscal Intelligent) that answers French tax
+questions using AI agents and official legal sources. A multi-agent pipeline analyzes the
+question, searches official sources, and generates an answer with legal references.
+
+**The production target is the FastAPI service in `api/`**, consumed by a chat tab on
+fiscalonline.fr (front developed separately with the Vercel AI SDK). fiscalonline's own API
+acts as an auth proxy: it authenticates the subscriber, then forwards the call with an
+`X-API-Key` shared secret and `X-User-Email`. Streamlit is now only an internal debug UI.
+
+**One pipeline, three surfaces** — none of them reimplements business logic:
+
+| Surface | Role | Entry point |
+|---|---|---|
+| `api/` | Production HTTP + SSE | `uvicorn api.main:app` |
+| `streamlit_app.py` | Internal debug UI | `streamlit run streamlit_app.py` |
+| `test_pipeline.py` | CLI, one question | `python test_pipeline.py "…" --stream` |
+
+This matters: `streamlit_app.py` used to carry its own copy of the pipeline, which drifted
+from the headless one (missing FiscalOnline branch, different jurisprudence parsing,
+different models). Keeping a second live consumer of `pipeline/core.py` is what makes any
+new drift immediately visible. **Never add pipeline logic outside `pipeline/`.**
 
 ## Commands
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+pip install -r requirements.txt          # runtime only (API) — no Streamlit
+pip install -r requirements-dev.txt      # + Streamlit, deepeval, pytest
 
-# Run the application
-streamlit run streamlit_app.py
-
-# Or use the helper script (activates venv, loads .env, runs app)
-./run.sh
+uvicorn api.main:app --port 8080         # production service
+streamlit run streamlit_app.py           # debug UI
+python test_pipeline.py "…" --stream     # CLI
+pytest                                   # unit + API tests
 ```
 
 ## Required API Keys
 
-Set these in `.env` file or Streamlit secrets (`.streamlit/secrets.toml`):
+Set these in `.env` (or Streamlit secrets for the debug UI). Full annotated list in
+`.env.example`; deployment procedure in `deploy/DEPLOYMENT.md`; front-facing contract in
+`docs/API.md`.
+
+- `API_SHARED_SECRET` - Shared secret expected in `X-API-Key` (comma-separated values allowed, for rotation)
 - `OPENAI_API_KEY` - For GPT models (orchestrateur, generaliste, ranker)
 - `GOOGLE_API_KEY` - For Gemini models (analyste, specialises, verificateur, redactionnel, jurisprudence_dork, suivi)
 - `SERPAPI_API_KEY` - For web search on official French legal sources
@@ -30,7 +53,12 @@ Set these in `.env` file or Streamlit secrets (`.streamlit/secrets.toml`):
 
 ## Architecture
 
-### Agent Pipeline (streamlit_app.py)
+### Agent Pipeline (pipeline/core.py)
+
+`run_pipeline_stream()` is the **single** implementation; `run_pipeline()` merely drains it
+with `stream_redaction=False` (blocking rédactionnel, `json_mode=True` — the eval path is
+unchanged). It yields `StepEvent` / `SourcesEvent` / `TextDelta` / `ResultEvent`
+(`pipeline/events.py`).
 
 The question processing follows this sequential pipeline:
 
@@ -57,7 +85,14 @@ The question processing follows this sequential pipeline:
 10. **Scraper** (`LegalScraper` + Firecrawl fallback, max 5 threads) - Extracts content from ranked sources
 11. **Agent Rédactionnel** (Gemini, streaming) - Generates final structured answer with legal references
 
-Follow-up questions use **Agent Suivi** (Gemini) which reuses `contexte_conversation` instead of the full pipeline. Returns `necessite_nouvelle_recherche: bool` to trigger full pipeline when needed.
+Follow-up questions use **Agent Suivi** (`pipeline/followup.py`), which reuses
+`contexte_conversation` instead of the full pipeline. Its answer is buffered, not streamed,
+so `necessite_nouvelle_recherche` can be read **before** anything reaches the client: when
+it is true, the service transparently chains into the full pipeline (`escalated: true` in
+`data-meta`) instead of dead-ending the turn.
+
+`build_contexte()` refreshes the context after **every** turn. The old app only wrote it
+after the first question, so long conversations kept answering against the first exchange.
 
 ### Key Data Flows
 
@@ -66,6 +101,11 @@ Follow-up questions use **Agent Suivi** (Gemini) which reuses `contexte_conversa
 - Search results are structured dicts with: `title`, `url`, `snippet`, `source_domain`, `position`, `query`
 - Ranked results include: `keep` (bool), `score` (float), `reason` (str)
 - Scraper adds a `content` field to ranked docs; Supabase storage strips full content (keeps 200-char preview)
+- **`content` never leaves the process**: `pipeline/events.public_sources()` projects sources
+  onto publishable fields. FiscalOnline / JusticeLibre entries carry whole articles.
+- The rédactionnel streams **raw JSON**, not markdown (and without `json_mode`, so it may
+  arrive fenced). `pipeline/normalizer.RedactionNormalizer` extracts `reponse_redigee`
+  incrementally so consumers receive clean markdown. Never stream its chunks directly.
 
 ### Official Sources
 
@@ -76,25 +116,49 @@ Domain matching is strict: exact match or subdomain only (prevents fake domains)
 
 ### Model Configuration
 
-Default models per agent are defined in `streamlit_app.py` (`DEFAULT_MODELS`). Users can override via the Streamlit sidebar. Model names map to actual API model IDs via `MODEL_MAPPING`.
+Production defaults live in `pipeline/core.py` (`DEFAULT_MODELS`, mostly Claude), shared by
+the API and the debug UI. Logical names resolve to LiteLLM ids via `utils/model_registry.py`.
 
-- **Gemini agents:** analyste, redactionnel, specialises, suivi, verificateur, jurisprudence_dork → default `gemini-2.5-flash` family
-- **OpenAI agents:** orchestrateur, generaliste, ranker → default `gpt-4o` family
+`eval/configs.py` deliberately keeps its **own** frozen base (Gemini / GPT-4o): it feeds
+`eval/cache.py::_key()`, so importing the production defaults would invalidate the whole
+eval disk cache on every production model change. Changing the eval baseline is a separate,
+explicit decision.
 
 ### Persistence & Auth (Supabase)
 
-- **`utils/conversations.py`** - Save/list/load/delete conversations. Strips heavy `content` fields on save. Supports `user_email` filtering for multi-user access.
-- **`utils/feedback.py`** - Collect thumbs up/down ratings, optional comments, sources count, follow-up flag. Requires a `feedbacks` table in Supabase. Integrates Supabase Auth (email/password).
+- **`services/supabase.py`** - Shared `@lru_cache` client. Never call `create_client` directly.
+- **`utils/conversations.py`** - Save/list/load/delete conversations. Strips heavy `content` fields on save.
+- **`utils/feedback.py`** - Thumbs up/down + optional comment; also attaches the rating as a
+  Langfuse score via `trace_id`.
+
+⚠️ **User isolation is purely application-level** (`.eq("user_email", …)`); there is no RLS.
+Every query must be scoped by the identity from `X-User-Email` — never by a value from the
+request body. A missing filter would expose every subscriber's conversations.
 
 ### Scraping Strategy (`utils/scraper_utils.py`)
 
 1. **Primary:** `LegalScraper` (`legal_scraper.py`) - custom scraper with trafilatura, supports all official domains, 0.3s rate limit delay
 2. **Fallback:** Firecrawl API for JavaScript-heavy pages (cleans jsessionid/cid params before calling)
+3. **Global budget** (`SCRAPE_TOTAL_TIMEOUT_S`, default 120s) - the step returns partial
+   results rather than blocking. Per-call timeouts are not enough: trafilatura extraction is
+   pure computation with no timeout, and a large BOFiP page once hung a run for 30+ minutes.
 
 ## Code Patterns
 
 - Agent functions accept `api_key` and `model_name` parameters
 - All agent prompts request strict JSON output with no surrounding text
 - Use `clean_json_codefence` for OpenAI responses, `lire_json_beton` for Gemini/robust parsing
-- Session state manages: `messages`, `contexte_conversation`, `processing`, `active_domains`, `agent_models`
-- Active domains are passed through the entire pipeline (generaliste → search → ranker) and controlled via sidebar checkboxes
+- Active domains are passed through the entire pipeline (generaliste → search → ranker)
+- Thread hand-offs must use `copy_context().run` — the Langfuse run context is a `ContextVar`
+  and does not cross thread boundaries on its own; without it, costs are silently lost.
+
+### API-specific patterns (`api/`)
+
+- **Never hand a sync generator to `StreamingResponse`.** Starlette iterates it via
+  `anyio.to_thread.run_sync` **per item**, and anyio copies the context on each call — so
+  `ContextVar` mutations are discarded between yields. The Langfuse trace would silently
+  record zero cost. `api/runner.py` runs the whole pipeline in one dedicated thread and
+  bridges events with `loop.call_soon_threadsafe`. Its module docstring has the details.
+- SSE endpoints must be `async def` (only async generators receive the disconnect
+  `CancelledError`); Supabase-touching endpoints must be plain `def` (blocking client).
+- `api/sse.py` is the only place that knows the AI SDK wire format (v5/v4 switchable).

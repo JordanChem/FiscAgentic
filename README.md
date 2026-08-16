@@ -77,29 +77,50 @@ pip install -r requirements.txt
 
 ## 🏃 Utilisation
 
-### En local
+Le projet expose **deux** surfaces au-dessus du même pipeline
+(`pipeline/core.py`) — aucune ne réimplémente la logique métier :
+
+| Surface | Rôle | Lancement |
+|---|---|---|
+| **API FastAPI** (`api/`) | Production — consommée par fiscalonline.fr | `uvicorn api.main:app --port 8080` |
+| **UI Streamlit** (`streamlit_app.py`) | Debug et démonstration internes | `streamlit run streamlit_app.py` |
+| **CLI** (`test_pipeline.py`) | Une question en ligne de commande | `python test_pipeline.py "…" --stream` |
+
+### API (cible de production)
 
 ```bash
-streamlit run app.py
+pip install -r requirements.txt          # runtime seul, sans Streamlit
+export API_SHARED_SECRET=$(openssl rand -hex 32)
+uvicorn api.main:app --host 127.0.0.1 --port 8080
 ```
 
-L'application s'ouvrira dans votre navigateur à l'adresse `http://localhost:8501`
+Le contrat d'intégration destiné au développeur front est dans
+[docs/API.md](docs/API.md) : endpoints, schémas, séquence SSE (protocole Vercel
+AI SDK), codes d'erreur, exemples `curl` et `useChat`.
+
+L'authentification est déléguée : l'API de fiscalonline authentifie l'abonné,
+puis relaie l'appel avec `X-API-Key` et `X-User-Email`.
+
+### UI Streamlit (debug interne)
+
+```bash
+pip install -r requirements-dev.txt      # ajoute streamlit, deepeval, pytest
+streamlit run streamlit_app.py
+```
+
+Disponible sur `http://localhost:8501`.
 
 ### Déploiement
 
-L'application peut être déployée sur :
+Procédure complète (systemd, nginx, recette, exploitation, rollback) :
+[deploy/DEPLOYMENT.md](deploy/DEPLOYMENT.md). Une image Docker est également
+fournie (`deploy/Dockerfile`).
 
-- Streamlit Cloud
-- Heroku
-- AWS
-- Tout autre service supportant Streamlit
+### Tests
 
-Pour Streamlit Cloud :
-
-1. Pousser le code sur GitHub
-2. Se connecter à [share.streamlit.io](https://share.streamlit.io)
-3. Connecter le dépôt
-4. Ajouter les secrets dans la configuration
+```bash
+pytest                                   # tests unitaires + tests d'API
+```
 
 ## 🧪 Tests & évaluation de la qualité
 

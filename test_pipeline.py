@@ -9,6 +9,9 @@ Usage :
     python test_pipeline.py
     python test_pipeline.py "Quelles sont les conditions d'exonération de TVA ... ?"
     python test_pipeline.py "..." --no-jl     # force SerpAPI seul (sans JusticeLibre)
+    python test_pipeline.py "..." --stream    # consomme le générateur d'événements
+                                              # (même chemin que l'API SSE)
+    python test_pipeline.py "..." --config baseline   # config de modèles nommée
 """
 import sys
 import logging
@@ -24,7 +27,8 @@ logging.basicConfig(
 for _lib in ("urllib3", "httpcore", "httpx", "google", "openai", "h11", "LiteLLM"):
     logging.getLogger(_lib).setLevel(logging.WARNING)
 
-from pipeline.core import run_pipeline
+from pipeline.core import run_pipeline, run_pipeline_stream
+from pipeline.events import ResultEvent, SourcesEvent, StepEvent, TextDelta
 
 
 def _sep(label=""):
@@ -36,19 +40,57 @@ def _sep(label=""):
         print("─" * width)
 
 
+def _run_streaming(question, use_jl, models_config):
+    """Consomme le générateur d'événements — exactement ce que fait l'API SSE."""
+    result = None
+    for event in run_pipeline_stream(question, use_justicelibre=use_jl,
+                                     models_config=models_config):
+        if isinstance(event, StepEvent):
+            if event.status == "running":
+                print(f"\n[{event.progress:3d}%] {event.label}…", flush=True)
+            else:
+                extra = " ".join(f"{k}={v}" for k, v in event.meta.items())
+                print(f"        ↳ {event.status} en {event.elapsed_s}s  {extra}", flush=True)
+        elif isinstance(event, SourcesEvent):
+            print(f"\n>>> {len(event.sources)} sources retenues", flush=True)
+        elif isinstance(event, TextDelta):
+            print(event.delta, end="", flush=True)
+        elif isinstance(event, ResultEvent):
+            result = event.result
+    print()
+    return result
+
+
 def main():
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    flags = [a for a in sys.argv[1:] if a.startswith("--")]
+    argv = sys.argv[1:]
+    flags = [a for a in argv if a.startswith("--")]
+
+    config_name = None
+    if "--config" in argv:
+        i = argv.index("--config")
+        config_name = argv[i + 1] if i + 1 < len(argv) else None
+        argv = argv[:i] + argv[i + 2:]          # retire le flag ET sa valeur
+
+    args = [a for a in argv if not a.startswith("--")]
     question = args[0] if args else (
         "Quelles sont les conditions pour qu'un tribunal administratif annule "
         "un redressement fiscal en matière de TVA ?"
     )
     use_jl = "--no-jl" not in flags
 
+    models_config = None
+    if config_name:
+        from eval.configs import get_config
+        models_config = get_config(config_name)
+
     _sep("QUESTION")
     print(question)
 
-    res = run_pipeline(question, use_justicelibre=use_jl)
+    if "--stream" in flags:
+        _sep("FLUX")
+        res = _run_streaming(question, use_jl, models_config)
+    else:
+        res = run_pipeline(question, models_config, use_justicelibre=use_jl)
 
     if res.error:
         _sep("ERREUR")

@@ -1,18 +1,15 @@
 """
-Module de feedback utilisateur avec stockage Supabase
+Module de feedback utilisateur avec stockage Supabase.
+
+Sans dépendance Streamlit : utilisable depuis l'API FastAPI comme depuis l'UI
+de debug. Les erreurs sont journalisées et remontées via la valeur de retour
+(`bool`), c'est à l'appelant de décider comment les présenter.
 """
-import os
-import streamlit as st
-from supabase import create_client
+import logging
 
+from services.supabase import get_supabase_client  # noqa: F401  (ré-export historique)
 
-def get_supabase_client():
-    """Initialise et retourne le client Supabase"""
-    url = os.getenv("SUPABASE_URL") or st.secrets.get("SUPABASE_URL", "")
-    key = os.getenv("SUPABASE_KEY") or st.secrets.get("SUPABASE_KEY", "")
-    if not url or not key:
-        return None
-    return create_client(url, key)
+logger = logging.getLogger(__name__)
 
 
 def _attach_langfuse_score(trace_id: str, rating: int, comment: str = None) -> None:
@@ -74,5 +71,5 @@ def save_feedback(question: str, answer: str, rating: int, comment: str = None,
         client.table("feedbacks").insert(data).execute()
         return True
     except Exception as e:
-        st.error(f"Erreur lors de l'envoi du feedback : {e}")
+        logger.error("Erreur lors de l'envoi du feedback : %s", e)
         return False

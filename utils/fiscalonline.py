@@ -17,13 +17,12 @@ Usage :
 import ast
 import html
 import logging
-import os
 
 import pandas as pd
 import requests
-import streamlit as st
 from bs4 import BeautifulSoup
 
+from utils.api_keys import get_fiscalonline_token, get_secret
 from utils.json_utils import clean_json_codefence
 from utils.llm import llm_call
 
@@ -34,7 +33,7 @@ BASE_URL = "https://api.fiscalonline.com"
 
 def _get_fiscalonline_token() -> str:
     """Récupère le token FiscalOnline depuis l'env ou les secrets Streamlit."""
-    token = os.getenv("FISCALONLINE_TOKEN") or st.secrets.get("FISCALONLINE_TOKEN", "")
+    token = get_fiscalonline_token()
     if not token:
         raise ValueError(
             "Le token FiscalOnline n'est pas défini !\n"
@@ -85,7 +84,7 @@ def agent_relevent_fiscalonline_tag(
     Identifie les tags FiscalOnline les plus pertinents pour la question.
     Retourne une string représentant un dict Python {id: name}.
     """
-    api_key = api_key or os.environ.get("OPENAI_API_KEY")
+    api_key = api_key or get_secret("OPENAI_API_KEY")
     if not api_key:
         raise ValueError(
             "L'API key OpenAI n'est pas définie !\n"
@@ -162,7 +161,7 @@ def agent_ranker_fiscalonline(
     Sélectionne les articles les plus pertinents parmi dic_articles.
     Retourne une string représentant une liste Python d'IDs.
     """
-    api_key = api_key or os.environ.get("OPENAI_API_KEY")
+    api_key = api_key or get_secret("OPENAI_API_KEY")
     if not api_key:
         raise ValueError(
             "L'API key OpenAI n'est pas définie !\n"
