@@ -1,0 +1,24 @@
+# ─── Serveur de production : API FastAPI seule ────────────────────────────────
+#
+# Version allégée de requirements.txt, sans Streamlit ni outillage d'évaluation.
+# C'est ce qu'installent `deploy/DEPLOYMENT.md` et `deploy/Dockerfile`.
+#
+# ⚠️ Ne pas utiliser pour Streamlit Cloud : celui-ci ne lit que `requirements.txt`.
+
+# ── Pipeline ─────────────────────────────────────────────────────────────────
+litellm>=1.55.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+trafilatura>=1.6.0
+python-dotenv>=1.0.0
+firecrawl-py>=0.0.16
+supabase>=2.0.0
+langfuse>=2.50.0,<3.0.0
+pandas>=2.0.0
+
+# ── API FastAPI ──────────────────────────────────────────────────────────────
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+gunicorn>=21.2.0
+pydantic>=2.6.0
+pydantic-settings>=2.2.0

@@ -22,8 +22,9 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # Couche de dépendances séparée : le code change bien plus souvent qu'elles.
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
+# requirements-api.txt : sans Streamlit ni outillage d'évaluation.
+COPY requirements-api.txt .
+RUN pip install --no-cache-dir -r requirements-api.txt \
  && apt-get purge -y build-essential libxml2-dev libxslt1-dev \
  && apt-get autoremove -y
 

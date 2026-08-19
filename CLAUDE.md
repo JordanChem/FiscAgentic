@@ -29,8 +29,12 @@ new drift immediately visible. **Never add pipeline logic outside `pipeline/`.**
 ## Commands
 
 ```bash
-pip install -r requirements.txt          # runtime only (API) — no Streamlit
-pip install -r requirements-dev.txt      # + Streamlit, deepeval, pytest
+pip install -r requirements.txt          # full app (pipeline + API + Streamlit)
+pip install -r requirements-api.txt      # production server: API only, no Streamlit
+pip install -r requirements-dev.txt      # + deepeval, pytest
+
+# Streamlit Cloud only reads `requirements.txt` at the repo root — it cannot be
+# pointed at another file. Removing Streamlit from it breaks that deployment.
 
 uvicorn api.main:app --port 8080         # production service
 streamlit run streamlit_app.py           # debug UI

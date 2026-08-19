@@ -1,26 +1,35 @@
-# ─── Runtime de production (API FastAPI) ──────────────────────────────────────
-# Ne pas ajouter ici streamlit / deepeval : ils vivent dans requirements-dev.txt
-# et l'API doit pouvoir démarrer dans un environnement où ils sont absents.
+# ─── Application complète : pipeline + API + UI Streamlit ─────────────────────
+#
+# C'est le fichier installé par défaut, et **le seul que Streamlit Cloud sait
+# lire** (il cherche `requirements.txt` à la racine, sans possibilité d'en
+# désigner un autre). Retirer Streamlit d'ici casse le déploiement Cloud.
+#
+# Autres fichiers :
+#   requirements-api.txt  → serveur de production (API seule, sans Streamlit)
+#   requirements-dev.txt  → + évaluation (deepeval) et tests
 
-fastapi>=0.110.0
-uvicorn[standard]>=0.27.0
-gunicorn>=21.2.0
-pydantic>=2.6.0
-pydantic-settings>=2.2.0
-
+# ── Pipeline (cœur métier, partagé par les trois surfaces) ───────────────────
 # Couche d'abstraction LLM unique (Gemini / OpenAI / Anthropic) — voir utils/llm.py
 litellm>=1.55.0
-
 requests>=2.31.0
 beautifulsoup4>=4.12.0
 trafilatura>=1.6.0
 python-dotenv>=1.0.0
 firecrawl-py>=0.0.16
 supabase>=2.0.0
-
 # Langfuse v2 : compatible avec le callback "langfuse" de LiteLLM (groupement par
 # trace_id/metadata) et l'API Datasets/Experiments utilisée dans eval/compare.py.
 langfuse>=2.50.0,<3.0.0
-
 # Utilisé par utils/fiscalonline.py (mise en forme des articles internes).
 pandas>=2.0.0
+
+# ── API FastAPI ──────────────────────────────────────────────────────────────
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+gunicorn>=21.2.0
+pydantic>=2.6.0
+pydantic-settings>=2.2.0
+
+# ── UI Streamlit (debug interne + déploiement Streamlit Cloud) ───────────────
+streamlit>=1.28.0
+streamlit-cookies-controller==0.0.4

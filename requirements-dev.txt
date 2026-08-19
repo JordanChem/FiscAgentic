@@ -1,11 +1,7 @@
-# ─── Développement : UI de debug Streamlit, évaluation, tests ─────────────────
-# Ne pas installer sur le serveur de production.
+# ─── Développement : évaluation de la qualité et tests ────────────────────────
+# Ne pas installer sur le serveur de production (voir requirements-api.txt).
 
 -r requirements.txt
-
-# UI de debug interne (client du même pipeline que l'API)
-streamlit>=1.28.0
-streamlit-cookies-controller==0.0.4
 
 # Évaluation qualité du pipeline (golden dataset + comparaison de modèles)
 deepeval>=2.0.0

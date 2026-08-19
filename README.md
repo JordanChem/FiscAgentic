@@ -89,7 +89,7 @@ Le projet expose **deux** surfaces au-dessus du même pipeline
 ### API (cible de production)
 
 ```bash
-pip install -r requirements.txt          # runtime seul, sans Streamlit
+pip install -r requirements-api.txt      # sans Streamlit ni outillage d'éval
 export API_SHARED_SECRET=$(openssl rand -hex 32)
 uvicorn api.main:app --host 127.0.0.1 --port 8080
 ```
@@ -104,7 +104,7 @@ puis relaie l'appel avec `X-API-Key` et `X-User-Email`.
 ### UI Streamlit (debug interne)
 
 ```bash
-pip install -r requirements-dev.txt      # ajoute streamlit, deepeval, pytest
+pip install -r requirements.txt          # application complète (Streamlit inclus)
 streamlit run streamlit_app.py
 ```
 
@@ -190,7 +190,9 @@ Sans clés Langfuse, tout fonctionne à l'identique (aucune trace émise).
 │   └── compare.py              # Comparaison de modèles (qualité × coût × latence)
 ├── test_pipeline.py            # CLI : lance une question hors Streamlit
 ├── legal_scraper.py            # Scraper pour sites juridiques
-├── requirements.txt            # Dépendances Python
+├── requirements.txt            # Dépendances (app complète — lu par Streamlit Cloud)
+├── requirements-api.txt        # Dépendances du serveur de production
+├── requirements-dev.txt        # + évaluation et tests
 ├── .env.example                # Exemple de configuration
 ├── .gitignore                  # Fichiers à ignorer
 └── README.md                   # Ce fichier

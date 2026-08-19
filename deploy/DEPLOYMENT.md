@@ -25,11 +25,13 @@ sudo -u fisca git clone <repo> /opt/fisca-api
 cd /opt/fisca-api
 
 sudo -u fisca python3.12 -m venv venv
-sudo -u fisca venv/bin/pip install -r requirements.txt   # runtime seul, sans Streamlit
+sudo -u fisca venv/bin/pip install -r requirements-api.txt   # sans Streamlit
 ```
 
-`requirements.txt` ne contient **que** le runtime de l'API. `requirements-dev.txt`
-(Streamlit, deepeval, pytest) n'a rien à faire sur le serveur de production.
+`requirements-api.txt` ne contient **que** le runtime de l'API. `requirements.txt`
+embarque en plus l'UI Streamlit (c'est le seul fichier que sait lire Streamlit Cloud),
+et `requirements-dev.txt` y ajoute deepeval et pytest — ni l'un ni l'autre n'a sa place
+sur le serveur de production.
 
 ---
 
@@ -187,7 +189,7 @@ permet de tourner sans coupure :
 ```bash
 cd /opt/fisca-api
 sudo -u fisca git checkout <tag-précédent>
-sudo -u fisca venv/bin/pip install -r requirements.txt
+sudo -u fisca venv/bin/pip install -r requirements-api.txt
 sudo systemctl restart fisca-api
 ```
 
