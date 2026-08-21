@@ -36,7 +36,7 @@ litellm.drop_params = True  # ignore les params non supportés par un provider d
 # Budgets d'appel. Sans eux, un appel qui ne rend jamais la main immobilise un
 # slot de pipeline indéfiniment : un run de recette a vu l'orchestrateur bloqué
 # 290 s sur un seul appel — un délai que rien n'aurait interrompu.
-LLM_TIMEOUT_S = float(os.getenv("LLM_TIMEOUT_S", "90"))
+LLM_TIMEOUT_S = float(os.getenv("LLM_TIMEOUT_S", "240"))
 LLM_STREAM_TIMEOUT_S = float(os.getenv("LLM_STREAM_TIMEOUT_S", "180"))
 # Une seule reprise : à 2 reprises, le pire cas d'un seul agent (3 × 90 s)
 # consommerait à lui seul la moitié du budget global de la requête.
