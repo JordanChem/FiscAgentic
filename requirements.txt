@@ -10,7 +10,7 @@
 
 # ── Pipeline (cœur métier, partagé par les trois surfaces) ───────────────────
 # Couche d'abstraction LLM unique (Gemini / OpenAI / Anthropic) — voir utils/llm.py
-litellm>=1.55.0
+litellm>=1.55.0,<1.104.0
 requests>=2.31.0
 beautifulsoup4>=4.12.0
 trafilatura>=1.6.0

@@ -6,7 +6,7 @@
 # ⚠️ Ne pas utiliser pour Streamlit Cloud : celui-ci ne lit que `requirements.txt`.
 
 # ── Pipeline ─────────────────────────────────────────────────────────────────
-litellm>=1.55.0
+litellm>=1.55.0,<1.104.0
 requests>=2.31.0
 beautifulsoup4>=4.12.0
 trafilatura>=1.6.0
